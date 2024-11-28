@@ -1,0 +1,361 @@
+---
+title: "TimeSeries Walmart Project"
+author: "Kenya Roy and Lani Lewis"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+knitr::opts_chunk$set(warning = FALSE)
+
+#install.packages("ggplot2")
+library(ggplot2)
+
+library(tswge)
+library(forecast)
+
+library(dplyr)
+
+# Signal Plus Noise
+#install.packages("orcutt")
+library(orcutt)
+
+# Dickey Fuller Test
+#install.packages("tseries")
+library(tseries)
+
+library(vars)
+
+# Fancharts
+library(RColorBrewer)
+
+# MLP
+#install.packages("nnfor")
+library(nnfor)
+
+
+# Load Files
+library(tcltk)
+
+# Function to show a popup and allow the user to choose a file
+choose_file_with_message <- function(message) {
+  tkmessageBox(message = message, icon = "info", type = "ok") # Display the message
+  chosen_file <- tk_choose.files() # Open the file dialog
+  return(chosen_file) # Return the chosen file path
+}
+
+# Use the function to choose files with descriptive messages
+train <- read.csv(choose_file_with_message("Please select the 'train' file"))
+feature <- read.csv(choose_file_with_message("Please select the 'feature' file"))
+store <- read.csv(choose_file_with_message("Please select the 'store' file"))
+valid <- read.csv(choose_file_with_message("Please select the 'test' file"))
+```
+
+# EDA & CLEAN DATA
+## Merge Data
+```{r, echo=FALSE, results='hide'}
+new_trained = merge(train, feature, by = c("Store", "Date"), all.x = T) # Left Join tested and no Unmatched fields...
+
+trained = merge(new_trained, store, by = c("Store"), all.x = T) 
+
+head(trained)
+```
+
+### Validation Dataset
+```{r, echo=FALSE, results='hide'}
+new_validation = merge(valid, feature, by = c("Store", "Date"), all.x = T)
+
+validation = merge(new_validation, store, by = c("Store"), all.x = T) 
+
+head(validation)
+```
+
+### Clean up merge duplicate columns
+```{r, echo=FALSE, results='hide'}
+# Automatically drop duplicate columns with ".y" suffix
+trained <- trained[, !grepl("\\.y$", names(trained))]
+#test_set <- test_set[, !grepl("\\.y$", names(test_set))]
+validation <- validation[, !grepl("\\.y$", names(validation))]
+
+# Rename columns ending with ".x" by removing the ".x" suffix
+names(trained) <- gsub("\\.x$", "", names(trained))
+#names(test_set) <- gsub("\\.x$", "", names(test_set))
+names(validation) <- gsub("\\.x$", "", names(validation))
+
+
+# Confirm the dimensions of each dataset
+cat("Training set dimensions:", dim(trained), "\n")
+#cat("Test set dimensions:", dim(test_set), "\n")
+cat("Validation set dimensions:", dim(validation), "\n")
+```
+
+### Clean up date types
+
+**Training Dataset**
+```{r, echo=FALSE, results='hide'}
+# Check data types for both train_set and test_set (optional)
+# sapply(train_set, class)
+# sapply(test_set, class)
+
+# Function to process a dataset (convert data types)
+process_dataset <- function(data) {
+  # Convert "Date" column to Date format
+  data$Date <- as.Date(data$Date, format = "%Y-%m-%d")
+  
+  # Ensure IsHoliday remains as integers (0/1)
+  data$IsHoliday <- as.integer(data$IsHoliday)
+  
+  # Convert numeric columns to integers where appropriate, excluding Weekly_Sales and IsHoliday
+  numeric_columns <- setdiff(names(data)[sapply(data, is.numeric)], c("Weekly_Sales", "IsHoliday"))
+  data[numeric_columns] <- lapply(data[numeric_columns], as.integer)
+  
+  # Keep "Weekly_Sales" and other continuous variables as numeric
+  if ("Weekly_Sales" %in% names(data)) {
+    data$Weekly_Sales <- as.numeric(data$Weekly_Sales)
+  }
+  
+  # Return the processed dataset
+  return(data)
+}
+
+# Apply the function to train_set and test_set
+trained <- process_dataset(trained)
+
+
+# Verify the updated data types
+cat("Original Trained structure:\n")
+str(trained)
+
+```
+**Validation Dataset**
+```{r, echo=FALSE, results='hide'}
+# Convert "Date" column to Date format
+validation$Date <- as.Date(validation$Date, format = "%Y-%m-%d")
+
+# Ensure IsHoliday remains as integers (0/1)
+validation$IsHoliday <- as.integer(validation$IsHoliday)
+
+# Convert numeric columns to integers where appropriate, excluding Weekly_Sales and IsHoliday
+numeric_columns <- setdiff(names(validation)[sapply(validation, is.numeric)], "IsHoliday")
+validation[numeric_columns] <- lapply(validation[numeric_columns], as.integer)
+
+# Verify the updated data types
+str(validation)
+```
+
+
+## NA Values
+```{r, echo=FALSE}
+# calculate the percentage of missing values for each column
+missing_percentage <- sapply(trained, function(col) {
+  sum(is.na(col)) / length(col) * 100
+})
+
+# Calculate the percentage of missing values for each column
+missing_percentage <- sapply(trained, function(col) {
+  sum(is.na(col)) / length(col) * 100
+})
+
+missing_percentage
+```
+### Remove NA >50%
+```{r, echo=FALSE, results='hide'}
+# Drop all columns with names starting with 'MarkDown'
+trained <- trained[, !grepl("^MarkDown", names(trained))]
+
+trained
+```
+
+
+### SPLIT
+
+**Filtered Training Dataset**
+```{r, echo=FALSE, results='hide'}
+set.seed(123)
+
+# Ensure the "Date" column is in Date format
+trained$Date <- as.Date(trained$Date, format = "%Y-%m-%d")
+
+# Filter the dataset to only include stores of Type 'A'
+trained_filtered <- trained %>% 
+  filter(Type == 'A')
+
+trained_filtered
+```
+## Aggregate Weekly_Sales and retain other columns
+```{r, echo=FALSE, results='hide'}
+# Aggregate Weekly_Sales and retain other columns
+aggregated_data <- trained_filtered %>%
+  group_by(Date) %>%
+  summarize(
+    weekly_sales = sum(Weekly_Sales, na.rm = TRUE),  # Sum Weekly_Sales
+    IsHoliday = first(IsHoliday),  # Retain the first IsHoliday value for each date
+    Temperature = mean(Temperature, na.rm = TRUE),  # Average temperature for the date
+    Fuel_Price = mean(Fuel_Price, na.rm = TRUE),    # Average fuel price
+    CPI = mean(CPI, na.rm = TRUE),                  # Average CPI
+    Unemployment = mean(Unemployment, na.rm = TRUE),# Average unemployment
+    Store = n_distinct(Store),                      # Number of distinct stores (if applicable)
+    .groups = "drop"                                # Ungroup after summarization
+  )
+
+# Sort data by Date
+aggregated_data <- aggregated_data %>% arrange(Date)
+
+# Check aggregated data
+aggregated_data
+```
+
+## 80/20 Train Test Split
+```{r, echo=FALSE}
+# Split 80% for training and 20% for testing
+split_index <- floor(0.8 * nrow(aggregated_data))
+train_set <- aggregated_data[1:split_index, ]
+test_set <- aggregated_data[(split_index + 1):nrow(aggregated_data), ]
+
+# Confirm the dimensions and proportions
+total_rows <- nrow(aggregated_data)
+train_rows <- nrow(train_set)
+test_rows <- nrow(test_set)
+
+train_percentage <- (train_rows / total_rows) * 100
+test_percentage <- (test_rows / total_rows) * 100
+
+cat("Training set dimensions:", dim(train_set), "\n")
+cat("Test set dimensions:", dim(test_set), "\n")
+cat(sprintf("Training set percentage: %.2f%%\n", train_percentage))
+cat(sprintf("Test set percentage: %.2f%%\n", test_percentage))
+```
+
+#### TEST SPLIT OF DATA
+**Aggregated Date**
+```{r, echo=FALSE, results='hide'}
+table(format(aggregated_data$Date, "%Y"))
+```
+
+**Train Test Set**
+```{r, echo=FALSE, results='hide'}
+plot(train_set$Date,train_set$Weekly_Sales)
+```
+
+**Test Set**
+- This is different then the validation set
+```{r, echo=FALSE, results='hide'}
+plot(test_set$Date,test_set$Weekly_Sales)
+```
+
+
+## PLOTS
+**Variables that are highly skewed often benefit from a log transformation.**
+```{r, echo=FALSE, results='hide'}
+# Plot histograms for all numeric variables
+numeric_vars <- sapply(train_set, is.numeric)  # Identify numeric columns
+trained_numeric <- train_set[, numeric_vars]
+
+# Plot histograms
+par(mfrow = c(2, 2))  # Create a grid for multiple plots
+for (col in colnames(trained_numeric)) {
+  hist(trained_numeric[[col]], main = paste("Histogram of", col), xlab = col)
+}
+```
+
+**Look for non-linear relationships where a log transformation could help linearize the data.**
+- Possibly log variables
+```{r, echo=FALSE, results='hide'}
+# Scatter plots of Weekly_Sales vs numeric variables
+par(mfrow = c(2, 2))
+for (col in setdiff(colnames(trained_numeric), "Weekly_Sales")) {
+  plot(trained_numeric[[col]], train_set$Weekly_Sales, 
+       main = paste("Scatter Plot:", col, "vs Weekly_Sales"),
+       xlab = col, ylab = "Weekly_Sales")
+}
+```
+
+**May not need to use Highly correlated data**
+- Keep all variables
+```{r, echo=FALSE, results='hide'}
+# Identify numeric columns
+numeric_vars <- sapply(train_set, is.numeric)
+
+# Calculate correlations for each numeric variable with Weekly_Sales
+correlations <- sapply(names(train_set)[numeric_vars], function(col) {
+  if (col != "Weekly_Sales") {  # Exclude Weekly_Sales from self-correlation
+    cor(train_set[[col]], train_set$weekly_sales, use = "complete.obs")
+  } else {
+    NA  # Exclude Weekly_Sales from self-correlation
+  }
+})
+
+# Convert to a data frame for better readability
+correlation_df <- data.frame(
+  Variable = names(correlations),
+  Correlation = correlations
+)
+
+# Remove NA values (like self-correlation of Weekly_Sales)
+correlation_df <- correlation_df[!is.na(correlation_df$Correlation), ]
+
+# Sort by absolute correlation values
+correlation_df <- correlation_df[order(abs(correlation_df$Correlation), decreasing = TRUE), ]
+
+# Display the results
+print(correlation_df)
+```
+
+### TS Pots
+- Realization: The sharp spikes and upward or downward trends suggest that the series is non-stationary (mean and variance are not constant over time).
+- ACF: Strong correlations at lag 1 and lag 2, gradually decreasing, also indicating non-stationarity.
+- Spectral Density: looks like we have three high peaks the first is the strongest and we see high peaks around period 12 (13/14)
+ - The next import periods are around 3 then 2...
+ - The overall behavior indicates that differencing might be required to stabilize the series.
+```{r, echo=FALSE, results='hide'}
+plotts.sample.wge(train_set$weekly_sales, arlimits = T)
+```
+#### ACF | MA(q) Review
+- Maybe MA(4)
+```{r, echo=FALSE, results='hide'}
+acf(train_set$weekly_sales)
+```
+
+#### PACF | AR(p) Review
+- maybe a AR(4)
+```{r, echo=FALSE, results='hide'}
+pacf(train_set$weekly_sales)
+```
+
+#### Plot for Trend
+- It looks like there are spike around 13(11 - Nov) and 14(12 - Dec) period?
+ - Maybe a frequency peak at around .071 - .077 
+```{r, echo=FALSE, results='hide'}
+plot(train_set$Date, train_set$weekly_sales, type = "l", main = "Weekly Sales Over Time", xlab = "Date", ylab = "Sales")
+```
+
+##### Decompose Time Series
+**Summary of Insights**
+- **Trend**: A clear upward trend is present between time 2 and 3, indicating long-term growth.
+- **Seasonality**: The data has a strong seasonal component, which should be explicitly modeled.
+- **Stationarity**: The presence of both trend and seasonality suggests the series is non-stationary. First-order differencing (`d=1`) and/or seasonal differencing (`D=1`) may be required to stabilize the series for ARIMA modeling.
+- **Outliers**: The sharp spikes in the residuals suggest potential outliers or irregular events that may require further investigation or adjustments.
+---
+```{r, echo=FALSE, results='hide'}
+# Convert data to a time series object
+sales_ts <- ts(train_set$weekly_sales, frequency = 52)  # Weekly data, 52 weeks per year
+
+# Decompose the series
+decomposition <- decompose(sales_ts, type = "additive")  # or "multiplicative"
+plot(decomposition)
+```
+
+
+#### Dickey-Fuller Test for Stationarity
+- Reject the null hypothesis of Non-Stationarity
+ - This test was not as helpful as I had hopped cause we know that we need to difference the model from the plots above.
+ - This is actually a non-stationary model based off Kaggle as well. On the site they already mention this is a non-stationary model
+```{r, echo=FALSE, results='hide'}
+adf_test <- adf.test(train_set$weekly_sales)
+print(adf_test)
+```
+
