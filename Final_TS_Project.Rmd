@@ -247,6 +247,14 @@ plot(train_set$Date,train_set$Weekly_Sales)
 plot(test_set$Date,test_set$Weekly_Sales)
 ```
 
+##### COVERT DATASETS TS 
+```{r, echo=FALSE, results='hide'}
+d12_train = ts(train_set, frequency = c(12))
+d12_test = ts(test_set, frequency = c(12))
+
+d52_train = ts(train_set, frequency = c(52))
+d52_test = ts(test_set, frequency = c(52))
+```
 
 ## PLOTS
 **Variables that are highly skewed often benefit from a log transformation.**
@@ -359,3 +367,99 @@ adf_test <- adf.test(train_set$weekly_sales)
 print(adf_test)
 ```
 
+# ARMA MODEL
+
+## AIC Model Determination
+- I will test the following three models
+  - ARMA(5,1) increase the values for more options since we are at the max
+    - ARMA(5,1) is still in the top 5 so I will try this option
+    - ARMA(5,3) and ARMA(6,1) will be the next I play with.
+- After testing I found that ARMA(5,3) performs the best
+```{r, echo=FALSE, results='hide'}
+aic5.wge(train_set$weekly_sales, p=0:7, q=0:3)
+```
+
+## BIC Model Determination
+- Not going to use this model cause we know this is not white noise. So I increased the model
+ - Still not valid options
+```{r, echo=FALSE, results='hide'}
+aic5.wge(train_set$Weekly_Sales, p=0:7, q=0:3, type = 'bic')
+```
+
+## ARMA(5,3) Factor Table Check | Model Estimates
+- Here the 1-B is very apparent. This might be the best model to use since I know I need to difference my model
+- The frequency also seems to match up almost exactly with what I am seeing in the original realization
+```{r, echo=FALSE, results='hide'}
+arma53 = est.arma.wge(train_set$weekly_sales, p = 5, q=3)
+```
+
+### RESIDUAL CHECKS ARMA(5,3)
+
+#### ACF Residual Check
+- Passed the ACF White Noise Residual Check
+```{r, echo=FALSE, results='hide'}
+acf(arma53$res)
+```
+
+#### Ljung Residual Check
+- Fail to reject the Null Hypothesis of White Noise as the p-value is greater then .05 for both tests
+ - This is another pass for this model
+```{r, include=FALSE}
+arma_l1 = ljung.wge(arma53$res, p=5, q=3)
+```
+```{r, echo=FALSE}
+cat("p-value",arma_l1$pval)
+```
+
+```{r, include=FALSE}
+arma_l2 = ljung.wge(arma53$res, p=5, q=3, K=48)
+```
+```{r, echo=FALSE}
+cat("p-value",arma_l2$pval)
+```
+
+## Forecast
+```{r, echo=FALSE, results='hide'}
+arma_for = fore.arma.wge(train_set$weekly_sales, phi = arma53$phi, theta = arma53$theta, n.ahead = 8, lastn = T, limits = T)
+```
+
+### ASE
+```{r, echo=FALSE, results='hide'}
+arma_ase = mean((test_set$weekly_sales - arma_for$f)^2)
+
+#options(scipen = 999)  # Disable scientific notation globally
+print(arma_ase)      # Print result in full decimal format
+```
+
+### Compare Multiple Spectral Densities
+- This model appears to perform well with generating the spectral densities
+```{r, echo=FALSE, results='hide'}
+sims = 10
+SpecDen = parzen.wge(train_set$weekly_sales, plot = "FALSE")
+plot(SpecDen$freq,SpecDen$pzgram, type = "l", lwd = 6) # Best look at the model
+
+for( i in 1: sims)
+{
+   SpecDen2 = parzen.wge(gen.arima.wge(114, phi = arma53$phi,theta = arma53$theta, plot ="FALSE"), plot = "FALSE")
+   lines(SpecDen2$freq,SpecDen2$pzgram, lwd = 2, col = "red") 
+} # 30 examples of the spectral data to compare to the original
+```
+
+### Compare Multiple ACFs
+- Does fairly well modeling the ACFs
+```{r, echo=FALSE, results='hide'}
+sims = 10
+ACF = acf(train_set$weekly_sales, plot = "FALSE")
+plot(ACF$lag ,ACF$acf , type = "l", lwd = 6)
+
+for( i in 1: sims)
+{
+   ACF2 = acf(gen.arima.wge(114, phi = arma53$phi,theta = arma53$theta, plot = "FALSE"), plot = "FALSE")
+   lines(ACF2$lag ,ACF2$acf, lwd = 2, col = "red")
+}
+```
+
+### Rolling Window RMSE
+```{r, echo=FALSE, results='hide'}
+roll.win.rmse.wge(test_set$weekly_sales, phi = arma53$phi,theta = arma53$theta, horizon = 8)
+```
