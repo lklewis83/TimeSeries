@@ -232,7 +232,7 @@ cat(sprintf("Test set percentage: %.2f%%\n", test_percentage))
 
 #### TEST SPLIT OF DATA
 **Aggregated Date**
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 table(format(aggregated_data$Date, "%Y"))
 ```
 
@@ -248,6 +248,21 @@ plot(test_set$Date,test_set$Weekly_Sales)
 ```
 
 #### SCALE VARIABLES
+**AGGREGATED**
+```{r, echo=FALSE, results='hide'}
+# Create a copy of your dataset to keep the original intact
+scaled_a <- aggregated_data
+
+# List of columns to scale
+columns_to_scale <- c("Temperature", "Fuel_Price", "CPI", "Unemployment", "weekly_sales")
+
+# Scale the columns and replace them in the dataset
+scaled_a[columns_to_scale] <- scale(scaled_a[columns_to_scale])
+
+# Check the scaled dataset
+head(scaled_a)
+```
+
 **TRAINED**
 ```{r, echo=FALSE, results='hide'}
 # Create a copy of your dataset to keep the original intact
@@ -285,6 +300,14 @@ d12_test = ts(scaled_test, frequency = c(12))
 
 d52_train = ts(scaled, frequency = c(52))
 d52_test = ts(scaled_test, frequency = c(52))
+```
+
+### DIFFERENCE DATA
+```{r, echo=FALSE, results='hide'}
+# Apply seasonal difference (lag = 52) and first-order difference (1-B)
+diff = artrans.wge(scaled$weekly_sales, phi.tr = 1) 
+ 
+season = artrans.wge(diff, phi.tr = 52) # ASE 3.82882e+12 | Visually This looks better
 ```
 
 ## PLOTS
@@ -467,7 +490,7 @@ arma_l2 = ljung.wge(arma53$res, p=5, q=3, K=48)
 cat("p-value",arma_l2$pval)
 ```
 
-## Forecast
+## Forecast ARMA Model
 ```{r, echo=FALSE, results='hide'}
 #arma_for = fore.arma.wge(train_set$weekly_sales, phi = arma53$phi, theta = arma53$theta, n.ahead = 8, lastn = T, limits = T)
 
@@ -475,7 +498,7 @@ arma_for = fore.arma.wge(scaled$weekly_sales, phi = arma53$phi, theta = arma53$t
 ```
 
 ### ASE
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 #arma_ase = mean((test_set$weekly_sales - arma_for$f)^2)
 arma_ase = mean((scaled_test$weekly_sales - arma_for$f)^2)
 
@@ -483,7 +506,7 @@ arma_ase = mean((scaled_test$weekly_sales - arma_for$f)^2)
 print(arma_ase)      # Print result in full decimal format
 ```
 ### WMAE | Kaggle
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
 
 # Calculate WMAE
@@ -523,9 +546,114 @@ for( i in 1: sims)
 }
 ```
 
-### Rolling Window RMSE
-```{r, echo=FALSE, results='hide'}
-#roll.win.rmse.wge(test_set$weekly_sales, phi = arma53$phi,theta = arma53$theta, horizon = 8)
+## FINAL ARMA(5,3) MODEL
+$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
 
-roll.win.rmse.wge(scaled_test$weekly_sales, phi = arma53$phi,theta = arma53$theta, horizon = 8)
+# ARUMA(5,1,1) w/ s=52
+
+## AIC Model Determineation
+```{r, echo=FALSE, results='hide'}
+aic5.wge(season, p=0:7, q=0:3)
 ```
+
+## BIC Model Determineation
+```{r, echo=FALSE, results='hide'}
+aic5.wge(season, p=0:7, q=0:3, type = "bic")
+```
+
+## ARUMA(5,1,1) w/ s = 52 Factor Table Check | Model Estimates
+```{r, echo=FALSE, results='hide'}
+season_est = est.arma.wge(season, p=5, q=1)
+```
+
+### RESIDUAL CHECKS ARUMA (5,1,1) w/ s=52
+
+#### ACF Residual Check
+- Passed the ACF White Noise Residual Check
+```{r, echo=FALSE, results='hide'}
+acf(season_est$res)
+```
+
+#### Ljung Residual Check
+- Fail to reject the Null Hypothesis of White Noise as the p-value is greater then .05 for both tests
+ - This is another pass for this model
+```{r, include=FALSE}
+season_l1 = ljung.wge(season_est$res, p=5, q=1)
+```
+```{r, echo=FALSE}
+cat("p-value",season_l1$pval)
+```
+
+```{r, include=FALSE}
+season_l2 = ljung.wge(season_est$res, p=5, q=1, K=48)
+```
+```{r, echo=FALSE}
+cat("p-value",season_l2$pval)
+```
+
+#### ASE
+```{r, echo=FALSE, results='hide'}
+season_ase = mean((test_set$weekly_sales - season_for$f)^2)
+
+#options(scipen = 999)  # Disable scientific notation globally
+print(season_ase)      # Print result in full decimal format
+```
+
+### WMAE | Kaggle
+```{r, echo=FALSE}
+weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
+
+# Calculate WMAE
+season_wmae <- sum(weights * abs(scaled_test$weekly_sales - season_for$f)) / sum(weights)
+
+# Print the result
+season_wmae
+```
+
+#### Compare Multiple Spectral Densities
+- This model appears to perform well with generating the spectral densities
+```{r, echo=FALSE, results='hide'}
+sims = 50
+SpecDen = parzen.wge(train_set$weekly_sales, plot = "FALSE")
+plot(SpecDen$freq,SpecDen$pzgram, type = "l", lwd = 6) # Best look at the model
+
+for( i in 1: sims)
+{
+   SpecDen2 = parzen.wge(gen.aruma.wge(114, phi = season_est$phi,theta = season_est$theta, d=1, s=52, plot ="FALSE"), plot = "FALSE")
+   lines(SpecDen2$freq,SpecDen2$pzgram, lwd = 2, col = "red") 
+} # 30 examples of the spectral data to compare to the original
+```
+
+#### Compare Multiple ACFs
+- Does fairly well modeling the ACFs
+```{r, echo=FALSE, results='hide'}
+sims = 50
+ACF = acf(train_set$weekly_sales, plot = "FALSE")
+plot(ACF$lag ,ACF$acf , type = "l", lwd = 6)
+
+for( i in 1: sims)
+{
+   ACF2 = acf(gen.aruma.wge(114, phi = season_est$phi,theta = season_est$theta, d=1, s=52, plot = "FALSE"), plot = "FALSE")
+   lines(ACF2$lag ,ACF2$acf, lwd = 2, col = "red")
+}
+```
+
+# VAR Model
+
+## AIC Model Determineation
+
+## BIC Model Determineation
+
+## VAR Model Factor Table Check | Model Estimates
+
+#### ACF Residual Check
+
+#### Ljung Residual Check
+
+#### ASE
+
+#### WMAE | Kaggle
+
+#### Compare Multiple Spectral Densities
+
+#### Compare Multiple ACFs
