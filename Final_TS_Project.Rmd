@@ -247,21 +247,54 @@ plot(train_set$Date,train_set$Weekly_Sales)
 plot(test_set$Date,test_set$Weekly_Sales)
 ```
 
+#### SCALE VARIABLES
+**TRAINED**
+```{r, echo=FALSE, results='hide'}
+# Create a copy of your dataset to keep the original intact
+scaled <- train_set
+
+# List of columns to scale
+columns_to_scale <- c("Temperature", "Fuel_Price", "CPI", "Unemployment", "weekly_sales")
+
+# Scale the columns and replace them in the dataset
+scaled[columns_to_scale] <- scale(scaled[columns_to_scale])
+
+# Check the scaled dataset
+head(scaled)
+```
+
+**TEST**
+```{r, echo=FALSE, results='hide'}
+# Create a copy of your dataset to keep the original intact
+scaled_test <- test_set
+
+# List of columns to scale
+columns_to_scale <- c("Temperature", "Fuel_Price", "CPI", "Unemployment", "weekly_sales")
+
+# Scale the columns and replace them in the dataset
+scaled_test[columns_to_scale] <- scale(scaled_test[columns_to_scale])
+
+# Check the scaled dataset
+head(scaled_test)
+```
+
 ##### COVERT DATASETS TS 
 ```{r, echo=FALSE, results='hide'}
-d12_train = ts(train_set, frequency = c(12))
-d12_test = ts(test_set, frequency = c(12))
+d12_train = ts(scaled, frequency = c(12))
+d12_test = ts(scaled_test, frequency = c(12))
 
-d52_train = ts(train_set, frequency = c(52))
-d52_test = ts(test_set, frequency = c(52))
+d52_train = ts(scaled, frequency = c(52))
+d52_test = ts(scaled_test, frequency = c(52))
 ```
 
 ## PLOTS
 **Variables that are highly skewed often benefit from a log transformation.**
 ```{r, echo=FALSE, results='hide'}
 # Plot histograms for all numeric variables
-numeric_vars <- sapply(train_set, is.numeric)  # Identify numeric columns
-trained_numeric <- train_set[, numeric_vars]
+#numeric_vars <- sapply(train_set, is.numeric)  # Identify numeric columns
+numeric_vars <- sapply(scaled, is.numeric)
+#trained_numeric <- train_set[, numeric_vars]
+trained_numeric <- scaled[, numeric_vars]
 
 # Plot histograms
 par(mfrow = c(2, 2))  # Create a grid for multiple plots
@@ -276,7 +309,8 @@ for (col in colnames(trained_numeric)) {
 # Scatter plots of Weekly_Sales vs numeric variables
 par(mfrow = c(2, 2))
 for (col in setdiff(colnames(trained_numeric), "Weekly_Sales")) {
-  plot(trained_numeric[[col]], train_set$Weekly_Sales, 
+  #plot(trained_numeric[[col]], train_set$Weekly_Sales, 
+    plot(trained_numeric[[col]], scaled$Weekly_Sales, 
        main = paste("Scatter Plot:", col, "vs Weekly_Sales"),
        xlab = col, ylab = "Weekly_Sales")
 }
@@ -286,12 +320,15 @@ for (col in setdiff(colnames(trained_numeric), "Weekly_Sales")) {
 - Keep all variables
 ```{r, echo=FALSE, results='hide'}
 # Identify numeric columns
-numeric_vars <- sapply(train_set, is.numeric)
+#numeric_vars <- sapply(train_set, is.numeric)
+numeric_vars <- sapply(scaled, is.numeric)
 
 # Calculate correlations for each numeric variable with Weekly_Sales
-correlations <- sapply(names(train_set)[numeric_vars], function(col) {
+#correlations <- sapply(names(train_set)[numeric_vars], function(col) {
+correlations <- sapply(names(scaled)[numeric_vars], function(col) {
   if (col != "Weekly_Sales") {  # Exclude Weekly_Sales from self-correlation
-    cor(train_set[[col]], train_set$weekly_sales, use = "complete.obs")
+#    cor(train_set[[col]], train_set$weekly_sales, use = "complete.obs")
+    cor(scaled[[col]], scaled$weekly_sales, use = "complete.obs")
   } else {
     NA  # Exclude Weekly_Sales from self-correlation
   }
@@ -320,25 +357,32 @@ print(correlation_df)
  - The next import periods are around 3 then 2...
  - The overall behavior indicates that differencing might be required to stabilize the series.
 ```{r, echo=FALSE, results='hide'}
-plotts.sample.wge(train_set$weekly_sales, arlimits = T)
+#plotts.sample.wge(train_set$weekly_sales, arlimits = T)
+plotts.sample.wge(scaled$weekly_sales, arlimits = T)
 ```
+
 #### ACF | MA(q) Review
 - Maybe MA(4)
 ```{r, echo=FALSE, results='hide'}
-acf(train_set$weekly_sales)
+#acf(train_set$weekly_sales)
+acf(scaled$weekly_sales)
 ```
 
 #### PACF | AR(p) Review
 - maybe a AR(4)
+ - scaled it looks like an AR(2)
 ```{r, echo=FALSE, results='hide'}
-pacf(train_set$weekly_sales)
+#pacf(train_set$weekly_sales)
+pacf(scaled$weekly_sales)
 ```
 
 #### Plot for Trend
 - It looks like there are spike around 13(11 - Nov) and 14(12 - Dec) period?
  - Maybe a frequency peak at around .071 - .077 
 ```{r, echo=FALSE, results='hide'}
-plot(train_set$Date, train_set$weekly_sales, type = "l", main = "Weekly Sales Over Time", xlab = "Date", ylab = "Sales")
+#plot(train_set$Date, train_set$weekly_sales, type = "l", main = "Weekly Sales Over Time", xlab = "Date", ylab = "Sales")
+
+plot(scaled$Date, scaled$weekly_sales, type = "l", main = "Weekly Sales Over Time", xlab = "Date", ylab = "Sales")
 ```
 
 ##### Decompose Time Series
@@ -350,7 +394,8 @@ plot(train_set$Date, train_set$weekly_sales, type = "l", main = "Weekly Sales Ov
 ---
 ```{r, echo=FALSE, results='hide'}
 # Convert data to a time series object
-sales_ts <- ts(train_set$weekly_sales, frequency = 52)  # Weekly data, 52 weeks per year
+#sales_ts <- ts(train_set$weekly_sales, frequency = 52)  # Weekly data, 52 weeks per year
+sales_ts <- ts(scaled$weekly_sales, frequency = 52)
 
 # Decompose the series
 decomposition <- decompose(sales_ts, type = "additive")  # or "multiplicative"
@@ -363,7 +408,8 @@ plot(decomposition)
  - This test was not as helpful as I had hopped cause we know that we need to difference the model from the plots above.
  - This is actually a non-stationary model based off Kaggle as well. On the site they already mention this is a non-stationary model
 ```{r, echo=FALSE, results='hide'}
-adf_test <- adf.test(train_set$weekly_sales)
+#adf_test <- adf.test(train_set$weekly_sales)
+adf_test <- adf.test(scaled$weekly_sales)
 print(adf_test)
 ```
 
@@ -376,21 +422,24 @@ print(adf_test)
     - ARMA(5,3) and ARMA(6,1) will be the next I play with.
 - After testing I found that ARMA(5,3) performs the best
 ```{r, echo=FALSE, results='hide'}
-aic5.wge(train_set$weekly_sales, p=0:7, q=0:3)
+#aic5.wge(train_set$weekly_sales, p=0:7, q=0:3)
+aic5.wge(scaled$weekly_sales, p=0:7, q=0:3)
 ```
 
 ## BIC Model Determination
 - Not going to use this model cause we know this is not white noise. So I increased the model
  - Still not valid options
 ```{r, echo=FALSE, results='hide'}
-aic5.wge(train_set$Weekly_Sales, p=0:7, q=0:3, type = 'bic')
+#aic5.wge(train_set$Weekly_Sales, p=0:7, q=0:3, type = 'bic')
+aic5.wge(scaled$Weekly_Sales, p=0:7, q=0:3, type = 'bic')
 ```
 
 ## ARMA(5,3) Factor Table Check | Model Estimates
 - Here the 1-B is very apparent. This might be the best model to use since I know I need to difference my model
 - The frequency also seems to match up almost exactly with what I am seeing in the original realization
 ```{r, echo=FALSE, results='hide'}
-arma53 = est.arma.wge(train_set$weekly_sales, p = 5, q=3)
+#arma53 = est.arma.wge(train_set$weekly_sales, p = 5, q=3)
+arma53 = est.arma.wge(scaled$weekly_sales, p = 5, q=3)
 ```
 
 ### RESIDUAL CHECKS ARMA(5,3)
@@ -420,12 +469,15 @@ cat("p-value",arma_l2$pval)
 
 ## Forecast
 ```{r, echo=FALSE, results='hide'}
-arma_for = fore.arma.wge(train_set$weekly_sales, phi = arma53$phi, theta = arma53$theta, n.ahead = 8, lastn = T, limits = T)
+#arma_for = fore.arma.wge(train_set$weekly_sales, phi = arma53$phi, theta = arma53$theta, n.ahead = 8, lastn = T, limits = T)
+
+arma_for = fore.arma.wge(scaled$weekly_sales, phi = arma53$phi, theta = arma53$theta, n.ahead = 8, lastn = T, limits = T)
 ```
 
 ### ASE
 ```{r, echo=FALSE, results='hide'}
-arma_ase = mean((test_set$weekly_sales - arma_for$f)^2)
+#arma_ase = mean((test_set$weekly_sales - arma_for$f)^2)
+arma_ase = mean((scaled_test$weekly_sales - arma_for$f)^2)
 
 #options(scipen = 999)  # Disable scientific notation globally
 print(arma_ase)      # Print result in full decimal format
@@ -435,7 +487,8 @@ print(arma_ase)      # Print result in full decimal format
 - This model appears to perform well with generating the spectral densities
 ```{r, echo=FALSE, results='hide'}
 sims = 10
-SpecDen = parzen.wge(train_set$weekly_sales, plot = "FALSE")
+#SpecDen = parzen.wge(train_set$weekly_sales, plot = "FALSE")
+SpecDen = parzen.wge(scaled$weekly_sales, plot = "FALSE")
 plot(SpecDen$freq,SpecDen$pzgram, type = "l", lwd = 6) # Best look at the model
 
 for( i in 1: sims)
@@ -449,7 +502,8 @@ for( i in 1: sims)
 - Does fairly well modeling the ACFs
 ```{r, echo=FALSE, results='hide'}
 sims = 10
-ACF = acf(train_set$weekly_sales, plot = "FALSE")
+#ACF = acf(train_set$weekly_sales, plot = "FALSE")
+ACF = acf(scaled$weekly_sales, plot = "FALSE")
 plot(ACF$lag ,ACF$acf , type = "l", lwd = 6)
 
 for( i in 1: sims)
@@ -461,5 +515,7 @@ for( i in 1: sims)
 
 ### Rolling Window RMSE
 ```{r, echo=FALSE, results='hide'}
-roll.win.rmse.wge(test_set$weekly_sales, phi = arma53$phi,theta = arma53$theta, horizon = 8)
+#roll.win.rmse.wge(test_set$weekly_sales, phi = arma53$phi,theta = arma53$theta, horizon = 8)
+
+roll.win.rmse.wge(scaled_test$weekly_sales, phi = arma53$phi,theta = arma53$theta, horizon = 8)
 ```
