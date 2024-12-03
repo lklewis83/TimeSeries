@@ -482,6 +482,16 @@ arma_ase = mean((scaled_test$weekly_sales - arma_for$f)^2)
 #options(scipen = 999)  # Disable scientific notation globally
 print(arma_ase)      # Print result in full decimal format
 ```
+### WMAE | Kaggle
+```{r, echo=FALSE, results='hide'}
+weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
+
+# Calculate WMAE
+arma_wmae <- sum(weights * abs(scaled_test$weekly_sales - arma_for$f)) / sum(weights)
+
+# Print the result
+arma_wmae
+```
 
 ### Compare Multiple Spectral Densities
 - This model appears to perform well with generating the spectral densities
