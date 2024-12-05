@@ -444,7 +444,7 @@ print(adf_test)
     - ARMA(5,1) is still in the top 5 so I will try this option
     - ARMA(5,3) and ARMA(6,1) will be the next I play with.
 - After testing I found that ARMA(5,3) performs the best
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 #aic5.wge(train_set$weekly_sales, p=0:7, q=0:3)
 aic5.wge(scaled$weekly_sales, p=0:7, q=0:3)
 ```
@@ -452,7 +452,7 @@ aic5.wge(scaled$weekly_sales, p=0:7, q=0:3)
 ## BIC Model Determination
 - Not going to use this model cause we know this is not white noise. So I increased the model
  - Still not valid options
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 #aic5.wge(train_set$Weekly_Sales, p=0:7, q=0:3, type = 'bic')
 aic5.wge(scaled$Weekly_Sales, p=0:7, q=0:3, type = 'bic')
 ```
@@ -460,7 +460,7 @@ aic5.wge(scaled$Weekly_Sales, p=0:7, q=0:3, type = 'bic')
 ## ARMA(5,3) Factor Table Check | Model Estimates
 - Here the 1-B is very apparent. This might be the best model to use since I know I need to difference my model
 - The frequency also seems to match up almost exactly with what I am seeing in the original realization
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 #arma53 = est.arma.wge(train_set$weekly_sales, p = 5, q=3)
 arma53 = est.arma.wge(scaled$weekly_sales, p = 5, q=3)
 ```
@@ -549,20 +549,121 @@ for( i in 1: sims)
 ## FINAL ARMA(5,3) MODEL
 $$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
 
+# ARIMA (5,1,3)
+
+## AIC Model Determineation
+- We don't see ARMA(5,3) in the top options.
+ - After playing around with other options we found ARMA(5,3) to work the best
+```{r, echo=FALSE}
+aic5.wge(diff, p=0:7, q=0:3)
+```
+
+## BIC Model Determineation
+```{r, echo=FALSE}
+aic5.wge(season, p=0:7, q=0:3, type = "bic")
+```
+
+## ARIMA (5,1,3) Factor Table Check | Model Estimates
+- Frequencies don't match exactly with the original model as the dominance has change
+- We still see the 1-B in the Moving Average Model
+```{r, echo=FALSE}
+diff_est = est.arma.wge(season, p=5, q=3)
+```
+
+### RESIDUAL CHECKS ARIMA (5,1,3) 
+
+#### ACF Residual Check
+- Passed the ACF White Noise Residual Check
+```{r, echo=FALSE, results='hide'}
+acf(diff_est$res)
+```
+
+#### Ljung Residual Check
+- Fail to reject the Null Hypothesis of White Noise as the p-value is greater then .05 for both tests
+ - This is another pass for this model
+```{r, include=FALSE}
+season_l1 = ljung.wge(diff_est$res, p=5, q=3)
+```
+```{r, echo=FALSE}
+cat("p-value",season_l1$pval)
+```
+
+```{r, include=FALSE}
+season_l2 = ljung.wge(diff_est$res, p=5, q=3, K=48)
+```
+```{r, echo=FALSE}
+cat("p-value",season_l2$pval)
+```
+
+## Forecast ARIMA (5,1,3) Model
+```{r, echo=FALSE, results='hide'}
+diff_for = fore.aruma.wge(scaled$weekly_sales, phi = diff_est$phi, theta = diff_est$theta, d=1, n.ahead = 8, lastn = T, limits = T)
+```
+
+#### ASE
+```{r, echo=FALSE, results='hide'}
+diff_ase = mean((scaled_test$weekly_sales - diff_for$f)^2)
+
+#options(scipen = 999)  # Disable scientific notation globally
+print(diff_ase)      # Print result in full decimal format
+```
+
+### WMAE | Kaggle
+```{r, echo=FALSE}
+weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
+
+# Calculate WMAE
+diff_wmae <- sum(weights * abs(scaled_test$weekly_sales - diff_for$f)) / sum(weights)
+
+# Print the result
+diff_wmae
+```
+
+#### Compare Multiple Spectral Densities
+- This model appears to perform well with generating the spectral densities
+```{r, echo=FALSE, results='hide'}
+sims = 50
+SpecDen = parzen.wge(train_set$weekly_sales, plot = "FALSE")
+plot(SpecDen$freq,SpecDen$pzgram, type = "l", lwd = 6) # Best look at the model
+
+for( i in 1: sims)
+{
+   SpecDen2 = parzen.wge(gen.aruma.wge(114, phi = season_est$phi,theta = season_est$theta, d=1, s=52, plot ="FALSE"), plot = "FALSE")
+   lines(SpecDen2$freq,SpecDen2$pzgram, lwd = 2, col = "red") 
+} # 30 examples of the spectral data to compare to the original
+```
+
+#### Compare Multiple ACFs
+- Does fairly well modeling the ACFs
+```{r, echo=FALSE, results='hide'}
+sims = 50
+ACF = acf(train_set$weekly_sales, plot = "FALSE")
+plot(ACF$lag ,ACF$acf , type = "l", lwd = 6)
+
+for( i in 1: sims)
+{
+   ACF2 = acf(gen.aruma.wge(114, phi = season_est$phi,theta = season_est$theta, d=1, s=52, plot = "FALSE"), plot = "FALSE")
+   lines(ACF2$lag ,ACF2$acf, lwd = 2, col = "red")
+}
+```
+
+## FINAL ARIMA (5,1,3) MODEL
+$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
+
 # ARUMA(5,1,1) w/ s=52
 
 ## AIC Model Determineation
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 aic5.wge(season, p=0:7, q=0:3)
 ```
 
 ## BIC Model Determineation
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 aic5.wge(season, p=0:7, q=0:3, type = "bic")
 ```
 
 ## ARUMA(5,1,1) w/ s = 52 Factor Table Check | Model Estimates
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 season_est = est.arma.wge(season, p=5, q=1)
 ```
 
@@ -591,9 +692,14 @@ season_l2 = ljung.wge(season_est$res, p=5, q=1, K=48)
 cat("p-value",season_l2$pval)
 ```
 
+## Forecast ARUMA (5,1,1) w/ s=52 Model
+```{r, echo=FALSE, results='hide'}
+season_for = fore.aruma.wge(scaled$weekly_sales, phi = season_est$phi, theta = season_est$theta, d=1, s=52, n.ahead = 8, lastn = T, limits = T)
+```
+
 #### ASE
 ```{r, echo=FALSE, results='hide'}
-season_ase = mean((test_set$weekly_sales - season_for$f)^2)
+season_ase = mean((scaled_test$weekly_sales - season_for$f)^2)
 
 #options(scipen = 999)  # Disable scientific notation globally
 print(season_ase)      # Print result in full decimal format
@@ -637,6 +743,9 @@ for( i in 1: sims)
    lines(ACF2$lag ,ACF2$acf, lwd = 2, col = "red")
 }
 ```
+
+## FINAL ARUMA (5,1,1) w/ s=52 MODEL
+$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
 
 # VAR Model
 
