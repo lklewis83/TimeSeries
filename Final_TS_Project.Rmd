@@ -293,13 +293,87 @@ scaled_test[columns_to_scale] <- scale(scaled_test[columns_to_scale])
 head(scaled_test)
 ```
 
+### LOG VARIABLES
+**AGGREGATED**
+```{r, echo=FALSE, results='hide'}
+# Apply log transformation to variables
+scaled_a$Temperature_L <- log(aggregated_data$Temperature + 1)  # Add 1 to avoid log(0)
+scaled_a$Fuel_Price_L <- log(aggregated_data$Fuel_Price + 1)
+
+# If you want to log-transform the dependent variable (Weekly_Sales)
+scaled_a$weekly_sales_L <- log(aggregated_data$weekly_sales + 1)
+```
+
+**TRAINED**
+```{r, echo=FALSE, results='hide'}
+# Apply log transformation to variables
+scaled$Temperature_L <- log(train_set$Temperature + 1)  # Add 1 to avoid log(0)
+scaled$Fuel_Price_L <- log(train_set$Fuel_Price + 1)
+
+# If you want to log-transform the dependent variable (Weekly_Sales)
+scaled$weekly_sales_L <- log(train_set$weekly_sales + 1)
+```
+
+**TEST**
+```{r, echo=FALSE, results='hide'}
+# Apply log transformation to variables
+scaled_test$Temperature_L <- log(test_set$Temperature + 1)  # Add 1 to avoid log(0)
+scaled_test$Fuel_Price_L <- log(test_set$Fuel_Price + 1)
+
+# If you want to log-transform the dependent variable (Weekly_Sales)
+scaled_test$weekly_sales_L <- log(test_set$weekly_sales + 1)
+
+# Check the transformed dataset
+head(scaled_test)
+```
+
+
 ##### COVERT DATASETS TS 
 ```{r, echo=FALSE, results='hide'}
-d12_train = ts(scaled, frequency = c(12))
-d12_test = ts(scaled_test, frequency = c(12))
+# Define training and testing datasets for monthly frequency
+d12_train <- ts(scaled_a$weekly_sales[1:134], frequency = 12)  
+d12_test <- ts(scaled_a$weekly_sales[135:143], frequency = 12)  
 
-d52_train = ts(scaled, frequency = c(52))
-d52_test = ts(scaled_test, frequency = c(52))
+# Define training and testing datasets for weekly frequency
+d52_train <- ts(scaled_a$weekly_sales[1:134], frequency = 52)  
+d52_test <- ts(scaled_a$weekly_sales[135:143], frequency = 52)  
+
+# For monthly frequency (12)
+exog_L12 <- data.frame(
+  #date = as.Date(scaled_a$Date),  
+  cpi = as.numeric(scaled_a$CPI),
+  holiday = as.numeric(scaled_a$IsHoliday),  
+  temperature = as.numeric(scaled_a$Temperature_L), 
+  fuel = as.numeric(scaled_a$Fuel_Price_L)  
+)
+
+# For weekly frequency (52)
+exog_L52 <- data.frame(
+  #date = as.Date(scaled_a$Date),  
+  cpi = as.numeric(scaled_a$CPI),
+  holiday = as.numeric(scaled_a$IsHoliday),  
+  temperature = as.numeric(scaled_a$Temperature_L),  
+  fuel = as.numeric(scaled_a$Fuel_Price_L)  
+)
+
+
+# For monthly frequency (12)
+exog_12 <- data.frame(
+  #date = as.Date(scaled_a$Date),  
+  cpi = as.numeric(scaled_a$CPI),
+  holiday = as.numeric(scaled_a$IsHoliday),  
+  temperature = as.numeric(scaled_a$Temperature),  
+  fuel = as.numeric(scaled_a$Fuel_Price)  
+)
+
+# For weekly frequency (52)
+exog_52 <- data.frame(
+  #date = as.Date(scaled_a$Date),  
+  cpi = as.numeric(scaled_a$CPI),
+  holiday = as.numeric(scaled_a$IsHoliday),  
+  temperature = as.numeric(scaled_a$Temperature),  
+  fuel = as.numeric(scaled_a$Fuel_Price)  
+)
 ```
 
 ### DIFFERENCE DATA
@@ -307,7 +381,11 @@ d52_test = ts(scaled_test, frequency = c(52))
 # Apply seasonal difference (lag = 52) and first-order difference (1-B)
 diff = artrans.wge(scaled$weekly_sales, phi.tr = 1) 
  
-season = artrans.wge(diff, phi.tr = 52) # ASE 3.82882e+12 | Visually This looks better
+#season = artrans.wge(diff, phi.tr = 52) 
+
+season = artrans.wge(diff, phi.tr = c(rep(0,51),1)) 
+
+monthly = artrans.wge(diff, phi.tr = c(rep(0,11),1)) 
 ```
 
 ## PLOTS
@@ -502,8 +580,7 @@ arma_for = fore.arma.wge(scaled$weekly_sales, phi = arma53$phi, theta = arma53$t
 #arma_ase = mean((test_set$weekly_sales - arma_for$f)^2)
 arma_ase = mean((scaled_test$weekly_sales - arma_for$f)^2)
 
-#options(scipen = 999)  # Disable scientific notation globally
-print(arma_ase)      # Print result in full decimal format
+arma_ase
 ```
 ### WMAE | Kaggle
 ```{r, echo=FALSE}
@@ -604,8 +681,7 @@ diff_for = fore.aruma.wge(scaled$weekly_sales, phi = diff_est$phi, theta = diff_
 ```{r, echo=FALSE, results='hide'}
 diff_ase = mean((scaled_test$weekly_sales - diff_for$f)^2)
 
-#options(scipen = 999)  # Disable scientific notation globally
-print(diff_ase)      # Print result in full decimal format
+diff_ase
 ```
 
 ### WMAE | Kaggle
@@ -628,7 +704,7 @@ plot(SpecDen$freq,SpecDen$pzgram, type = "l", lwd = 6) # Best look at the model
 
 for( i in 1: sims)
 {
-   SpecDen2 = parzen.wge(gen.aruma.wge(114, phi = season_est$phi,theta = season_est$theta, d=1, s=52, plot ="FALSE"), plot = "FALSE")
+   SpecDen2 = parzen.wge(gen.aruma.wge(114, phi = diff_est$phi,theta = diff_est$theta, d=1, plot ="FALSE"), plot = "FALSE")
    lines(SpecDen2$freq,SpecDen2$pzgram, lwd = 2, col = "red") 
 } # 30 examples of the spectral data to compare to the original
 ```
@@ -642,29 +718,35 @@ plot(ACF$lag ,ACF$acf , type = "l", lwd = 6)
 
 for( i in 1: sims)
 {
-   ACF2 = acf(gen.aruma.wge(114, phi = season_est$phi,theta = season_est$theta, d=1, s=52, plot = "FALSE"), plot = "FALSE")
+   ACF2 = acf(gen.aruma.wge(114, phi = diff_est$phi,theta = diff_est$theta, d=1, plot = "FALSE"), plot = "FALSE")
    lines(ACF2$lag ,ACF2$acf, lwd = 2, col = "red")
 }
 ```
 
 ## FINAL ARIMA (5,1,3) MODEL
-$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
+$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_t$$
 
 # ARUMA(5,1,1) w/ s=52
 
 ## AIC Model Determineation
 ```{r, echo=FALSE}
 aic5.wge(season, p=0:7, q=0:3)
+
+#aic5.wge(monthly, p=0:7, q=0:3)
 ```
 
 ## BIC Model Determineation
 ```{r, echo=FALSE}
 aic5.wge(season, p=0:7, q=0:3, type = "bic")
+
+#aic5.wge(monthly, p=0:7, q=0:3, type = "bic")
 ```
 
 ## ARUMA(5,1,1) w/ s = 52 Factor Table Check | Model Estimates
 ```{r, echo=FALSE}
 season_est = est.arma.wge(season, p=5, q=1)
+
+#monthly_est = est.arma.wge(season, p=6, q=1)
 ```
 
 ### RESIDUAL CHECKS ARUMA (5,1,1) w/ s=52
@@ -695,14 +777,22 @@ cat("p-value",season_l2$pval)
 ## Forecast ARUMA (5,1,1) w/ s=52 Model
 ```{r, echo=FALSE, results='hide'}
 season_for = fore.aruma.wge(scaled$weekly_sales, phi = season_est$phi, theta = season_est$theta, d=1, s=52, n.ahead = 8, lastn = T, limits = T)
+
+
+#monthly_for = fore.aruma.wge(scaled$weekly_sales, phi = monthly_est$phi, theta = monthly_est$theta, d=1, s=12, n.ahead = 8, lastn = T, limits = T)
 ```
 
 #### ASE
 ```{r, echo=FALSE, results='hide'}
 season_ase = mean((scaled_test$weekly_sales - season_for$f)^2)
 
-#options(scipen = 999)  # Disable scientific notation globally
-print(season_ase)      # Print result in full decimal format
+
+season_ase # 1.250516
+
+#monthly_ase = mean((scaled_test$weekly_sales - monthly_for$f)^2)
+
+
+#monthly_ase #  3.827409
 ```
 
 ### WMAE | Kaggle
@@ -747,6 +837,190 @@ for( i in 1: sims)
 ## FINAL ARUMA (5,1,1) w/ s=52 MODEL
 $$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
 
+# Signal Plus Noise
+## Forecast Scaled Signal Plus Noise as Best Model
+```{r, echo=FALSE, results='hide'}
+#spn_for = fore.sigplusnoise.wge(train_set$weekly_sales, linear = T, max.p = 6, n.ahead = 8, lastn = T, limits = T) # ASE: 4.790823e+12
+
+#spn_for = fore.sigplusnoise.wge(scaled$weekly_sales_L, linear = T, max.p = 6, n.ahead = 8, lastn = T, limits = T) # ASE: 9.038697e+14
+
+spn_for = fore.sigplusnoise.wge(scaled$weekly_sales, linear = T, max.p = 7, n.ahead = 8, lastn = T, limits = T) # ASE: 9.038707e+14
+```
+
+### ASE
+- ARMA(5,3) is my best model still when reviewing ASE
+```{r, echo=FALSE, results='hide'}
+spn_ase = mean((scaled_test$weekly_sales - spn_for$f)^2)
+
+spn_ase
+```
+
+### WMAE | Kaggle
+```{r, echo=FALSE, results='hide'}
+weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
+
+# Calculate WMAE
+wmae <- sum(weights * abs(scaled_test$weekly_sales - spn_for$f)) / sum(weights)
+
+# Print the result
+wmae
+```
+
+## FINAL SIGNAL PLUS NOISE MODEL
+$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
+
+# ARIMA MULTIVARIANT MODEL
+
+## Cross-Correlation Plots
+- In this case we are looking for the longest lag to determine how to lag Multivariate Models 
+- Since we know Holiday is important and our Lags are across the board, we deceicded to keep it simple and lag everything by 1
+```{r, echo=FALSE}
+#ccf(scaled$Date, scaled$CPI) # Heavily Correlated
+```
+
+```{r, echo=FALSE}
+ccf(scaled$weekly_sales, scaled$CPI) # lag -15
+
+ccf(scaled$weekly_sales, scaled$Date)  # lag -15
+
+ccf(scaled$weekly_sales, scaled$Temperature) # lag -7
+
+ccf(scaled$weekly_sales, scaled$Temperature_L) # lag -7
+
+ccf(scaled$weekly_sales, scaled$Fuel_Price) # lag -15
+
+ccf(scaled$weekly_sales, scaled$Fuel_Price_L) # lag -15
+
+ccf(scaled$weekly_sales, scaled$IsHoliday) # lag -1
+
+ccf(scaled$weekly_sales, scaled$Unemployment) # lag - 15
+```
+
+## Lag Variables
+```{r, echo=FALSE, results='hide'}
+scaled$temp1 = dplyr::lag(scaled$Temperature, 1)  
+scaled$fuel_price1 = dplyr::lag(scaled$Fuel_Price, 1)
+scaled$CPI1 = dplyr::lag(scaled$CPI, 1)
+scaled$Unemployment1 = dplyr::lag(scaled$Unemployment, 1)
+```
+
+## Fit Regression Model
+- will use this as the base line for the multivariant model
+```{r, echo=FALSE, results='hide'}
+ksfit = lm(scaled$weekly_sales[2:114] ~ scaled$temp1[2:114] + scaled$fuel_price1[2:114] +  scaled$Unemployment1[2:114] + scaled$CPI1[2:114] + seq(2,114,1)) 
+
+summary(ksfit)
+```
+
+### Check Regression Residual
+- Ensure the residuals have been whitened
+```{r, echo=FALSE, results='hide'}
+# Step 2 Review Residual
+plotts.sample.wge(ksfit$residuals)
+```
+
+### Difference Regression Residuals
+```{r, echo=FALSE, results='hide'}
+res_diff52 = artrans.wge(ksfit$residuals, phi.tr = c(rep(0,51),1)) # 52 - n
+```
+
+### Model Regression Residual
+**AIC**
+```{r, echo=FALSE, results='hide'}
+aic5.wge(res_diff52)
+```
+
+**BIC**
+```{r, echo=FALSE, results='hide'}
+aic5.wge(res_diff52, type = "bic")
+```
+
+## Forecast ARIMA (0,0,0) w/ s=52
+- Even though AIC and BIC model this as either ARMA or AR
+- We had original seen in the begin that the model could have noise in it
+ - We are taking this under consideration and ignoring our AIC and BIC model values for the "ORDER"
+```{r, echo=FALSE, results='hide'}
+time = seq(1,114,1)
+
+# Fit the ARIMA model
+fit_lag <- arima(
+  
+  x = scaled$weekly_sales[2:114],
+  order = c(0, 0, 0), 
+  seasonal = list(order=c(0,1,0),period = 52),  # P,D,Q
+  xreg = cbind( #reordered from VAR
+  scaled$fuel_price1[2:114],
+  scaled$CPI1[2:114],
+  time[2:114],
+  scaled$temp1[2:114],
+  scaled$Unemployment1[2:114]
+)
+  
+)
+
+fit_lag
+plotts.sample.wge(fit_lag$residuals)
+
+```
+
+
+#### ACF Residual Check
+- Passed the ACF White Noise Residual Check
+```{r, echo=FALSE, results='hide'}
+acf(fit_lag$res)
+```
+
+#### Ljung Residual Check
+- Fail to reject the Null Hypothesis of White Noise as the p-value is greater then .05 for both tests
+ - This is another pass for this model
+```{r, include=FALSE}
+arimaU_l1 = ljung.wge(fit_lag$res, p=0, q=0)
+```
+```{r, echo=FALSE}
+cat("p-value",season_l1$pval)
+```
+
+```{r, include=FALSE}
+arimau_l2 = ljung.wge(fit_lag$res, p=0, q=0, K=48)
+```
+```{r, echo=FALSE}
+cat("p-value",season_l2$pval)
+```
+## ARIMA(0,0,0) w/ s=52 Predictions
+```{r}
+last8 = data.frame(
+  fuel_price1L = scaled$fuel_price1[107:114],
+  CPI1L = scaled$CPI1[107:114],
+  timeL = time[107:114],
+  temp1L = scaled$temp1[107:114],
+  unemployment1L = scaled$Unemployment1[107:114]
+)
+
+#get predictions
+preds = predict(fit_lag,newxreg = last8)
+```
+
+
+### ASE
+```{r}
+ASE = mean((scaled$weekly_sales[107:114] - preds$pred)^2)
+ASE 
+```
+
+### WMAE | Kaggle
+```{r, echo=FALSE, results='hide'}
+weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
+
+# Calculate WMAE
+wmae <- sum(weights * abs(scaled_test$weekly_sales - spn_for$f)) / sum(weights)
+
+# Print the result
+wmae
+```
+
+## FINAL ARIMA(0,0,0) w/ s=52 MODEL
+$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
+
 # VAR Model
 
 ## AIC Model Determineation
@@ -766,3 +1040,48 @@ $$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-
 #### Compare Multiple Spectral Densities
 
 #### Compare Multiple ACFs
+
+
+
+
+# MLP Model
+
+## AIC Model Determineation
+
+## BIC Model Determineation
+
+## MLP Model Factor Table Check | Model Estimates
+
+#### ACF Residual Check
+
+#### Ljung Residual Check
+
+#### ASE
+
+#### WMAE | Kaggle
+
+
+# Model Decission
+- Need to update this code for all ASE and then do again for all WMAE
+```{r, echo=FALSE, results='hide'}
+# Creating a data frame to hold the model results
+model_results <- data.frame(
+  Model = c("ARMA", "ARIMA", "MLP"),
+  ASE = c(arma_ase, month_ase, mlp_ASE)  # Ensure these variables exist and are numeric
+)
+
+# Sort the data frame by ASE from smallest to largest
+model_results <- model_results[order(model_results$ASE), ]
+
+# Display the sorted data frame
+#print(model_results)
+```
+
+- This will give a nice little bar chart of metric scores for us to talk to
+```{r, echo=FALSE, results='hide'}
+# Creating a bar chart to compare ASE scores for the models
+ggplot(model_results, aes(x = Model, y = ASE, fill = Model)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  labs(title = "Model ASE Comparison", x = "Model", y = "Lower (ASE) is Better") +
+  theme_minimal()
+```
