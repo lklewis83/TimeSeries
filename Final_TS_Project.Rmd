@@ -7,6 +7,8 @@ output:
   html_document: default
 ---
 
+We invite you to watch our powerpoint presentation on our predictive modeling work online: https://youtu.be/eyyFiHjTxng
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
@@ -19,10 +21,12 @@ library(tswge)
 library(forecast)
 
 library(dplyr)
+library(corrplot)
+
 
 # Signal Plus Noise
 #install.packages("orcutt")
-library(orcutt)
+#library(orcutt)
 
 # Dickey Fuller Test
 #install.packages("tseries")
@@ -450,14 +454,43 @@ correlation_df <- correlation_df[order(abs(correlation_df$Correlation), decreasi
 # Display the results
 print(correlation_df)
 ```
+##Correlation Matrix of Numeric Variables
+Unemployment has high correlation with Fuel_Price and CPI variables. 
+```{r}
+numeric_vars <- train_set %>%
+  select_if(is.numeric) # Select all numeric columns
 
-### TS Pots
+# drop weekly_sales
+numeric_vars <- numeric_vars[, !colnames(numeric_vars) %in% "weekly_sales"]
+numeric_vars <- numeric_vars[, !colnames(numeric_vars) %in% "Store"]
+numeric_vars <- numeric_vars[, !colnames(numeric_vars) %in% "Dept"]
+numeric_vars <- numeric_vars[, !colnames(numeric_vars) %in% "Size"]
+
+# Compute the correlation matrix
+cor_matrix <- cor(numeric_vars, use = "complete.obs")  # Use only complete cases
+
+# Print the correlation matrix
+print(cor_matrix)
+
+# Adjust margins to create space for the title
+par(mar = c(5, 5, 7, 5))  # Increase the top margin (3rd value)
+corrplot(cor_matrix, 
+         method = "color", 
+         type = "upper", 
+         tl.col = "black", 
+         tl.srt = 45)
+title("Correlation Matrix of Numeric Variables", line = 5)  # Add title with proper spacing
+
+```
+
+### TS Plots
 - Realization: The sharp spikes and upward or downward trends suggest that the series is non-stationary (mean and variance are not constant over time).
 - ACF: Strong correlations at lag 1 and lag 2, gradually decreasing, also indicating non-stationarity.
 - Spectral Density: looks like we have three high peaks the first is the strongest and we see high peaks around period 12 (13/14)
  - The next import periods are around 3 then 2...
  - The overall behavior indicates that differencing might be required to stabilize the series.
 ```{r, echo=FALSE, results='hide'}
+
 #plotts.sample.wge(train_set$weekly_sales, arlimits = T)
 plotts.sample.wge(scaled$weekly_sales, arlimits = T)
 ```
@@ -478,7 +511,7 @@ pacf(scaled$weekly_sales)
 ```
 
 #### Plot for Trend
-- It looks like there are spike around 13(11 - Nov) and 14(12 - Dec) period?
+- It looks like there are spike around 13(11 - Nov) and 14(12 - Dec) period.
  - Maybe a frequency peak at around .071 - .077 
 ```{r, echo=FALSE, results='hide'}
 #plot(train_set$Date, train_set$weekly_sales, type = "l", main = "Weekly Sales Over Time", xlab = "Date", ylab = "Sales")
@@ -584,7 +617,7 @@ arma_ase
 ```
 ### WMAE | Kaggle
 ```{r, echo=FALSE}
-weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
+weights <- rep(1, length(scaled_test$weekly_sales))  
 
 # Calculate WMAE
 arma_wmae <- sum(weights * abs(scaled_test$weekly_sales - arma_for$f)) / sum(weights)
@@ -624,27 +657,32 @@ for( i in 1: sims)
 ```
 
 ## FINAL ARMA(5,3) MODEL
-$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
+$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_t, \ \hat{\sigma}^2_a = 0.6783202$$
 
 # ARIMA (5,1,3)
 
+## Dickey-Fuller Test for Stationarity
+- Reject the null hypothesis of Non-Stationarity
+```{r, echo=FALSE, results='hide'}
+adf_test <- adf.test(diff)
+print(adf_test)
+```
 ## AIC Model Determineation
-- We don't see ARMA(5,3) in the top options.
- - After playing around with other options we found ARMA(5,3) to work the best
+- We don't see ARMA(5,3) in the top options but decided to move forward with this option do the results from the first model
 ```{r, echo=FALSE}
 aic5.wge(diff, p=0:7, q=0:3)
 ```
 
-## BIC Model Determineation
+## BIC Model Determination
 ```{r, echo=FALSE}
-aic5.wge(season, p=0:7, q=0:3, type = "bic")
+aic5.wge(diff, p=0:7, q=0:3, type = "bic")
 ```
 
 ## ARIMA (5,1,3) Factor Table Check | Model Estimates
 - Frequencies don't match exactly with the original model as the dominance has change
 - We still see the 1-B in the Moving Average Model
 ```{r, echo=FALSE}
-diff_est = est.arma.wge(season, p=5, q=3)
+diff_est = est.arma.wge(diff, p=5, q=3)
 ```
 
 ### RESIDUAL CHECKS ARIMA (5,1,3) 
@@ -675,18 +713,19 @@ cat("p-value",season_l2$pval)
 ## Forecast ARIMA (5,1,3) Model
 ```{r, echo=FALSE, results='hide'}
 diff_for = fore.aruma.wge(scaled$weekly_sales, phi = diff_est$phi, theta = diff_est$theta, d=1, n.ahead = 8, lastn = T, limits = T)
+title(main = "Forecast ARIMA (5,1,3) Model")
 ```
 
 #### ASE
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 diff_ase = mean((scaled_test$weekly_sales - diff_for$f)^2)
 
-diff_ase
+diff_ase 
 ```
 
 ### WMAE | Kaggle
 ```{r, echo=FALSE}
-weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
+weights <- rep(1, length(scaled_test$weekly_sales))  
 
 # Calculate WMAE
 diff_wmae <- sum(weights * abs(scaled_test$weekly_sales - diff_for$f)) / sum(weights)
@@ -700,7 +739,7 @@ diff_wmae
 ```{r, echo=FALSE, results='hide'}
 sims = 50
 SpecDen = parzen.wge(train_set$weekly_sales, plot = "FALSE")
-plot(SpecDen$freq,SpecDen$pzgram, type = "l", lwd = 6) # Best look at the model
+plot(SpecDen$freq,SpecDen$pzgram, type = "l", lwd = 6, main = "ARIMA(5,1,3) Multiple Spectral Densities Comparison")
 
 for( i in 1: sims)
 {
@@ -714,7 +753,7 @@ for( i in 1: sims)
 ```{r, echo=FALSE, results='hide'}
 sims = 50
 ACF = acf(train_set$weekly_sales, plot = "FALSE")
-plot(ACF$lag ,ACF$acf , type = "l", lwd = 6)
+plot(ACF$lag ,ACF$acf , type = "l", lwd = 6, main = "ARIMA(5,1,3) ACF Comparison")
 
 for( i in 1: sims)
 {
@@ -723,10 +762,17 @@ for( i in 1: sims)
 }
 ```
 
-## FINAL ARIMA (5,1,3) MODEL
-$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_t$$
+## FINAL ARIMA (5,1,3) MODEL  
+$$(1 - 0.2202B + 0.0766B^2 - 0.0163B^3 - 0.2829B^4 + 0.3569B^5)(1 - B)(X_t - 0.006105923) = (1 - 0.8525B + 0.0815B^2 - 0.2290B^3)a_t, \ \hat{\sigma}^2_a = 0.7413429$$
 
-# ARUMA(5,1,1) w/ s=52
+# ARUMA(3,1,0) w/ s=52
+
+## Dickey-Fuller Test for Stationarity
+- Reject the null hypothesis of Non-Stationarity
+```{r, echo=FALSE, results='hide'}
+adf_test <- adf.test(season)
+print(adf_test)
+```
 
 ## AIC Model Determineation
 ```{r, echo=FALSE}
@@ -742,14 +788,14 @@ aic5.wge(season, p=0:7, q=0:3, type = "bic")
 #aic5.wge(monthly, p=0:7, q=0:3, type = "bic")
 ```
 
-## ARUMA(5,1,1) w/ s = 52 Factor Table Check | Model Estimates
+## ARUMA(3,1,0) w/ s = 52 Factor Table Check | Model Estimates
 ```{r, echo=FALSE}
-season_est = est.arma.wge(season, p=5, q=1)
+season_est = est.arma.wge(season, p=3, q=0)
 
 #monthly_est = est.arma.wge(season, p=6, q=1)
 ```
 
-### RESIDUAL CHECKS ARUMA (5,1,1) w/ s=52
+### RESIDUAL CHECKS ARUMA(3,1,0) w/ s=52
 
 #### ACF Residual Check
 - Passed the ACF White Noise Residual Check
@@ -761,43 +807,38 @@ acf(season_est$res)
 - Fail to reject the Null Hypothesis of White Noise as the p-value is greater then .05 for both tests
  - This is another pass for this model
 ```{r, include=FALSE}
-season_l1 = ljung.wge(season_est$res, p=5, q=1)
+season_l1 = ljung.wge(season_est$res, p=3, q=0)
 ```
 ```{r, echo=FALSE}
 cat("p-value",season_l1$pval)
 ```
 
 ```{r, include=FALSE}
-season_l2 = ljung.wge(season_est$res, p=5, q=1, K=48)
+season_l2 = ljung.wge(season_est$res, p=3, q=0, K=48)
 ```
 ```{r, echo=FALSE}
 cat("p-value",season_l2$pval)
 ```
 
-## Forecast ARUMA (5,1,1) w/ s=52 Model
+## Forecast ARUMA(3,1,0) w/ s=52 Model
 ```{r, echo=FALSE, results='hide'}
 season_for = fore.aruma.wge(scaled$weekly_sales, phi = season_est$phi, theta = season_est$theta, d=1, s=52, n.ahead = 8, lastn = T, limits = T)
-
+title(main = "Forecast ARUMA (3,1,0) Model")
 
 #monthly_for = fore.aruma.wge(scaled$weekly_sales, phi = monthly_est$phi, theta = monthly_est$theta, d=1, s=12, n.ahead = 8, lastn = T, limits = T)
 ```
 
 #### ASE
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 season_ase = mean((scaled_test$weekly_sales - season_for$f)^2)
 
 
-season_ase # 1.250516
-
-#monthly_ase = mean((scaled_test$weekly_sales - monthly_for$f)^2)
-
-
-#monthly_ase #  3.827409
+season_ase 
 ```
 
 ### WMAE | Kaggle
 ```{r, echo=FALSE}
-weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
+weights <- rep(1, length(scaled_test$weekly_sales))  
 
 # Calculate WMAE
 season_wmae <- sum(weights * abs(scaled_test$weekly_sales - season_for$f)) / sum(weights)
@@ -807,7 +848,7 @@ season_wmae
 ```
 
 #### Compare Multiple Spectral Densities
-- This model appears to perform well with generating the spectral densities
+- This model does not appear to perform very well with generating the spectral densities
 ```{r, echo=FALSE, results='hide'}
 sims = 50
 SpecDen = parzen.wge(train_set$weekly_sales, plot = "FALSE")
@@ -821,7 +862,7 @@ for( i in 1: sims)
 ```
 
 #### Compare Multiple ACFs
-- Does fairly well modeling the ACFs
+- Doesn't do very well modeling the ACFs
 ```{r, echo=FALSE, results='hide'}
 sims = 50
 ACF = acf(train_set$weekly_sales, plot = "FALSE")
@@ -834,46 +875,52 @@ for( i in 1: sims)
 }
 ```
 
-## FINAL ARUMA (5,1,1) w/ s=52 MODEL
-$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
+## FINAL ARUMA (3,1,0) MODEL with s=52 
+
+$$(1 + 0.5804B + 0.4008B^2 + 0.3096B^3)(1 - B)(X_t - 0.1205291) = a_t, \ \hat{\sigma}^2_a = 0.1205291 $$
 
 # Signal Plus Noise
+
 ## Forecast Scaled Signal Plus Noise as Best Model
+
 ```{r, echo=FALSE, results='hide'}
 #spn_for = fore.sigplusnoise.wge(train_set$weekly_sales, linear = T, max.p = 6, n.ahead = 8, lastn = T, limits = T) # ASE: 4.790823e+12
 
 #spn_for = fore.sigplusnoise.wge(scaled$weekly_sales_L, linear = T, max.p = 6, n.ahead = 8, lastn = T, limits = T) # ASE: 9.038697e+14
 
-spn_for = fore.sigplusnoise.wge(scaled$weekly_sales, linear = T, max.p = 7, n.ahead = 8, lastn = T, limits = T) # ASE: 9.038707e+14
+spn_for = fore.sigplusnoise.wge(scaled$weekly_sales, linear = T, max.p = 7, n.ahead = 8, lastn = T, limits = T) 
+par(mar = c(5, 4, -.75, 2) + 1.5)  
+title(main = "Forecast Signal Plus Noise Model")
 ```
 
 ### ASE
-- ARMA(5,3) is my best model still when reviewing ASE
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 spn_ase = mean((scaled_test$weekly_sales - spn_for$f)^2)
 
 spn_ase
 ```
 
 ### WMAE | Kaggle
-```{r, echo=FALSE, results='hide'}
+```{r, echo=FALSE}
 weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
 
 # Calculate WMAE
-wmae <- sum(weights * abs(scaled_test$weekly_sales - spn_for$f)) / sum(weights)
+spn_wmae <- sum(weights * abs(scaled_test$weekly_sales - spn_for$f)) / sum(weights)
 
 # Print the result
-wmae
+spn_wmae
 ```
 
-## FINAL SIGNAL PLUS NOISE MODEL
-$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
+## FINAL SIGNAL PLUS NOISE REGRESSION EQUATION
+- Sales tend to decrease overtime
 
-# ARIMA MULTIVARIANT MODEL
+$$sales = -0.1896494 + .003298251(time)$$
+
+# ARUMA MULTIVARIATE MODEL
 
 ## Cross-Correlation Plots
-- In this case we are looking for the longest lag to determine how to lag Multivariate Models 
-- Since we know Holiday is important and our Lags are across the board, we deceicded to keep it simple and lag everything by 1
+- In this case we are looking for the longest lag to determine how to lag multivariate models 
+- Since we know Holiday is important and our lags are across the board, we decided to keep it simple and lag everything by 1
 ```{r, echo=FALSE}
 #ccf(scaled$Date, scaled$CPI) # Heavily Correlated
 ```
@@ -905,9 +952,9 @@ scaled$Unemployment1 = dplyr::lag(scaled$Unemployment, 1)
 ```
 
 ## Fit Regression Model
-- will use this as the base line for the multivariant model
+- will use this as the base line for the multivariate model
 ```{r, echo=FALSE, results='hide'}
-ksfit = lm(scaled$weekly_sales[2:114] ~ scaled$temp1[2:114] + scaled$fuel_price1[2:114] +  scaled$Unemployment1[2:114] + scaled$CPI1[2:114] + seq(2,114,1)) 
+ksfit = lm(scaled$weekly_sales[2:114] ~ scaled$temp1[2:114] + scaled$fuel_price1[2:114] +  scaled$Unemployment1[2:114] + scaled$CPI1[2:114]) 
 
 summary(ksfit)
 ```
@@ -935,10 +982,7 @@ aic5.wge(res_diff52)
 aic5.wge(res_diff52, type = "bic")
 ```
 
-## Forecast ARIMA (0,0,0) w/ s=52
-- Even though AIC and BIC model this as either ARMA or AR
-- We had original seen in the begin that the model could have noise in it
- - We are taking this under consideration and ignoring our AIC and BIC model values for the "ORDER"
+## Forecast ARUMA (1,0,0) w/ s=52
 ```{r, echo=FALSE, results='hide'}
 time = seq(1,114,1)
 
@@ -946,12 +990,11 @@ time = seq(1,114,1)
 fit_lag <- arima(
   
   x = scaled$weekly_sales[2:114],
-  order = c(0, 0, 0), 
+  order = c(1, 0, 0), 
   seasonal = list(order=c(0,1,0),period = 52),  # P,D,Q
   xreg = cbind( #reordered from VAR
   scaled$fuel_price1[2:114],
   scaled$CPI1[2:114],
-  time[2:114],
   scaled$temp1[2:114],
   scaled$Unemployment1[2:114]
 )
@@ -974,114 +1017,390 @@ acf(fit_lag$res)
 - Fail to reject the Null Hypothesis of White Noise as the p-value is greater then .05 for both tests
  - This is another pass for this model
 ```{r, include=FALSE}
-arimaU_l1 = ljung.wge(fit_lag$res, p=0, q=0)
+arimaU_l1 = ljung.wge(fit_lag$res, p=1, q=0)
 ```
 ```{r, echo=FALSE}
-cat("p-value",season_l1$pval)
+cat("p-value",arimaU_l1$pval)
 ```
 
 ```{r, include=FALSE}
-arimau_l2 = ljung.wge(fit_lag$res, p=0, q=0, K=48)
+arimau_l2 = ljung.wge(fit_lag$res, p=1, q=0, K=48)
 ```
 ```{r, echo=FALSE}
 cat("p-value",season_l2$pval)
 ```
-## ARIMA(0,0,0) w/ s=52 Predictions
-```{r}
+
+## MULTIVARIATE ARUMA(1,0,0) w/ s=52 Predictions
+```{r, echo=FALSE, results='hide'}
 last8 = data.frame(
   fuel_price1L = scaled$fuel_price1[107:114],
   CPI1L = scaled$CPI1[107:114],
-  timeL = time[107:114],
   temp1L = scaled$temp1[107:114],
   unemployment1L = scaled$Unemployment1[107:114]
 )
 
 #get predictions
-preds = predict(fit_lag,newxreg = last8)
+aruma_preds = predict(fit_lag,newxreg = last8)
+
+
+weekly = aruma_preds$pred
+
+
+plot(seq(1,114,1), scaled$weekly_sales, type = "l", xlim = c(0,115))
+lines(seq(107,114,1), weekly, type = "l", col = "red")
+title(main= "ARUMA(1,0,0) s=52 Forecasts")
 ```
 
 
 ### ASE
-```{r}
-ASE = mean((scaled$weekly_sales[107:114] - preds$pred)^2)
-ASE 
+```{r, echo=FALSE}
+aruma_ASE = mean((scaled$weekly_sales[107:114] - aruma_preds$pred)^2)
+aruma_ASE 
 ```
 
 ### WMAE | Kaggle
-```{r, echo=FALSE, results='hide'}
-weights <- rep(1, length(scaled_test$weekly_sales))  # Equal weights; replace with actual weights if available
+```{r, echo=FALSE}
+actual_last8 = scaled_test$weekly_sales[(length(scaled_test$weekly_sales)-7):length(scaled_test$weekly_sales)]
+
+weights <- rep(1, length(actual_last8))  
 
 # Calculate WMAE
-wmae <- sum(weights * abs(scaled_test$weekly_sales - spn_for$f)) / sum(weights)
+ARUMA_wmae <- sum(weights * abs(actual_last8 - aruma_preds$pred)) / sum(weights)
 
-# Print the result
-wmae
+ARUMA_wmae 
 ```
 
-## FINAL ARIMA(0,0,0) w/ s=52 MODEL
-$$(1 - 0.1845B - 0.5098B^2 - 0.3896B^3 - 0.0227B^4 + 0.3018B^5)(X_t + 4.470451e-16) = (1 + 0.1845B - 0.4290B^2 - 0.7555B^3)a_T$$
-
-# VAR Model
-
-## AIC Model Determineation
-
-## BIC Model Determineation
-
-## VAR Model Factor Table Check | Model Estimates
-
-#### ACF Residual Check
-
-#### Ljung Residual Check
-
-#### ASE
-
-#### WMAE | Kaggle
-
 #### Compare Multiple Spectral Densities
+- This model does not appear to perform well with generating the spectral densities
+
+```{r, echo=FALSE}
+sims = 50
+SpecDen = parzen.wge(train_set$weekly_sales, plot = FALSE)
+plot(SpecDen$freq, SpecDen$pzgram, type = "l", lwd = 6)
+
+# Extract AR and MA coefficients
+ar_coef = fit_lag$coef[1]  
+ma_coef = fit_lag$coef[2]  
+
+for (i in 1:sims) {
+  SpecDen2 = parzen.wge(gen.aruma.wge(114, phi = ar_coef, theta = ma_coef, d = 1, s = 52, plot = FALSE), plot = FALSE)
+  lines(SpecDen2$freq, SpecDen2$pzgram, lwd = 2, col = "red")
+}
+```
 
 #### Compare Multiple ACFs
+- Does not do fairly well modeling the ACFs
+```{r, echo=FALSE, results='hide'}
+sims = 50
+ACF = acf(train_set$weekly_sales, plot = "FALSE")
+plot(ACF$lag ,ACF$acf , type = "l", lwd = 6)
+
+# Extract AR and MA coefficients
+ar_coef = fit_lag$coef[1] 
+ma_coef = fit_lag$coef[2]  
 
 
+for( i in 1: sims)
+{
+   ACF2 = acf(gen.aruma.wge(114, phi = ar_coef, theta = ma_coef, d=1, s=52, plot = "FALSE"), plot = "FALSE")
+   lines(ACF2$lag ,ACF2$acf, lwd = 2, col = "red")
+}
+```
+
+## FINAL ARUMA(1,0,0) w/ s=52 MODEL
+$$sales = (1 - 0.1780B) - 0.0665(lag.fuel) + 0.2753(lag.cpi) + 0.0083(lag.temp) + 0.1352(lag.unemployment)$$
+
+# VAR Model
+```{r, echo=FALSE}
+set.seed(123)
+
+xregs = cbind(
+    #scaled$weekly_sales,
+    #scaled$Date[3:114],
+    #scaled$IsHoliday[3:114],
+    scaled$Temperature,
+    scaled$Fuel_Price,
+    scaled$CPI)
+    #scaled$Unemployment[3:114])
+
+VARselect(scaled$weekly_sales, lag.max = 7, type = 'both', exogen = xregs)
+```
+
+
+## VAR Model Lag Predictions | Model Estimates
+```{r, echo=FALSE,  include=FALSE}
+set.seed(123)
+sales = scaled$weekly_sales
+isholiday =  scaled$IsHoliday
+fuel_price = scaled$Fuel_Price
+temperature = scaled$Temperature
+cpi =     scaled$CPI
+unemployment =  scaled$Unemployment
+date_ = scaled$Date
+
+# Seasonal Dummies?? | Season = 52
+scaled$Week = as.factor(scaled$weekly_sales%%52)
+week = scaled$Week
+
+scaled$Month = as.factor(scaled$weekly_sales%%12)
+month = scaled$Month
+
+
+y = cbind(
+    sales,
+    fuel_price,
+    temperature,
+    week, # Seasonal Dummy
+    cpi) # y3
+
+lsfit = VAR(y, p=5, type = "both", season = 52) # p = lag in this case
+
+summary(lsfit)
+```
+
+## Forecast VAR(5)
+```{r, echo=FALSE}
+var_pred = predict(lsfit, n.ahead = 8)
+
+var_pred
+
+weekly = var_pred$fcst$sales[,1]
+
+
+plot(seq(1,114,1), scaled$weekly_sales, type = "l", xlim = c(0,115))
+lines(seq(107,114,1), weekly, type = "l", col = "red")
+title(main= "VAR Forecasts")
+```
+
+#### Confidence Interval 
+```{r, echo=FALSE}
+# Extract the lower and upper CI
+wk_lower_ci <- quantile(var_pred$fcst$sales[, 1], probs = .975) # quantile(holder[,1],probs = .975)
+wk_upper_ci <- quantile(var_pred$fcst$sales[, 1], probs = .025) #quantile(holder[,1],probs = .025)
+
+# Use summary() to get statistics
+#summary(wk_lower_ci)
+#summary(wk_upper_ci)
+
+# Calculate the averages
+wk_average_lower <- mean(wk_lower_ci, na.rm = TRUE)
+wk_average_upper <- mean(wk_upper_ci, na.rm = TRUE)
+
+# SWITCH VALUES AROUND DUE TO NEGATIVE FORECASTS...
+cat("Average Lower CI:", wk_average_upper, "\n") 
+cat("Average Upper CI:", wk_average_lower, "\n")
+```
+
+#### ASE
+```{r, echo=FALSE}
+var_ASE = mean((scaled$weekly_sales[107:114] - weekly)^2)
+
+var_ASE 
+```
+
+#### WMAE | Kaggle 
+```{r, echo=FALSE}
+weights <- rep(1, length(scaled_test$weekly_sales))  
+
+actual_values <- scaled$weekly_sales[107:114]
+predicted_values <- weekly
+
+# Calculate WMAE
+var_wmae <- sum(weights * abs(actual_values - predicted_values)) / sum(weights)
+
+# Print the result
+var_wmae
+```
+
+## FINAL VAR Regression Model
+
+### Sales Equation:
+
+$$
+sales_t = -0.6228 + 0.1681 \cdot sales_{t-1} + 0.1818 \cdot fuel\_price_{t-1} - 0.1168 \cdot temperature_{t-1} + 0.0020 \cdot week_{t-1} + 0.4253 \cdot cpi_{t-1} \\
+\quad - 0.1340 \cdot sales_{t-2} - 0.1005 \cdot fuel\_price_{t-2} - 0.1535 \cdot temperature_{t-2} + 0.0028 \cdot week_{t-2} - 0.7972 \cdot cpi_{t-2} + \ldots + \epsilon_t
+$$
+
+
+### Fuel Price Equation:
+
+$$
+fuel\_price_t = -0.9297 + 0.4673 \cdot fuel\_price_{t-1} - 0.0971 \cdot sales_{t-1} - 0.4713 \cdot cpi_{t-1} - 0.5961 \cdot temperature_{t-2} \\
+\quad + 0.2138 \cdot fuel\_price_{t-2} + \ldots + \epsilon_t
+$$
+
+
+### Temperature Equation:
+
+$$
+temperature_t = -0.3104 + 0.3282 \cdot temperature_{t-1} + 0.6624 \cdot cpi_{t-1} - 0.5386 \cdot fuel\_price_{t-2} - 0.7805 \cdot cpi_{t-2} + \ldots + \epsilon_t
+$$
+
+
+### Week Equation:
+
+$$
+week_t = 153.9 - 0.236 \cdot week_{t-1} - 0.3757 \cdot week_{t-2} - 43.67 \cdot sales_{t-4} - 0.6056 \cdot week_{t-3} + \ldots + \epsilon_t
+$$
+
+
+### CPI Equation:
+
+$$
+cpi_t = -0.2888 + 0.6613 \cdot cpi_{t-1} + 0.0073 \cdot trend - 0.0313 \cdot fuel\_price_{t-4} - 0.1419 \cdot temperature_{t-4} + \ldots + \epsilon_t
+$$
+
+### Covariance Matrix of Residuals:
+$$
+\begin{bmatrix}
+ 0.0768 & -0.0054 & -0.0035 & -2.3978 & -0.0004 \\
+-0.0054 &  0.0316 &  0.0029 & -0.6382 & -0.0010 \\
+-0.0035 &  0.0029 &  0.0180 &  0.6042 & -0.0010 \\
+-2.3978 & -0.6382 &  0.6042 & 500.7604 & 0.1007 \\
+-0.0004 & -0.0010 & -0.0010 &  0.1007 & 0.0083
+\end{bmatrix}
+$$
+
+### Correlation Matrix of Residuals:
+$$
+\begin{bmatrix}
+ 1.0000 & -0.1097 & -0.0933 & -0.3866 & -0.0153 \\
+-0.1097 &  1.0000 &  0.1207 & -0.1604 & -0.0600 \\
+-0.0933 &  0.1207 &  1.0000 &  0.2012 & -0.0814 \\
+-0.3866 & -0.1604 &  0.2012 &  1.0000 &  0.0494 \\
+-0.0153 & -0.0600 & -0.0814 &  0.0494 &  1.0000
+\end{bmatrix}
+$$
 
 
 # MLP Model
+```{r, echo=FALSE}
+set.seed(123)
 
-## AIC Model Determineation
+mlp52 = mlp(d52_train,reps = 10, comb = "median", difforder = c(1,12), allow.det.season = T, hd.auto.type = "cv", sel.lag = T, xreg = exog_52) 
 
-## BIC Model Determineation
+mlp52
+```
 
-## MLP Model Factor Table Check | Model Estimates
+## PLOT MLP Model
+```{r, echo=FALSE, results='hide'}
+plot(mlp52)
+```
 
-#### ACF Residual Check
 
-#### Ljung Residual Check
+## MLP Forecast
+```{r, echo=FALSE, results='hide'}
+mlp52_for = forecast(mlp52, h=8, xreg = exog_52)
+
+mlp52_for
+```
+  
+```{r, echo=FALSE, results='hide'}  
+plot(mlp52_for)
+```
 
 #### ASE
+```{r, echo=FALSE, results='hide'}
+#mlp52_ase = mean((d52_test - mlp52_for$fitted)^2)
+aligned_fitted <- mlp52_for$fitted[1:9]
+
+# Recalculate ASE
+mlp52_ase <- mean((d52_test - aligned_fitted)^2, na.rm = TRUE)
+```
+```{r, echo=FALSE}
+mlp52_ase # L: 0.1026821 (s = 12)
+```
 
 #### WMAE | Kaggle
+```{r, echo=FALSE}
+# Weight vector
+weights <- rep(1, length(d52_test)) 
+
+# Calculate WMAE
+mlp52_wmae <- sum(weights * abs(d52_test - aligned_fitted)) / sum(weights)
+
+# Print the result
+mlp52_wmae 
+```
+
+# Ensemble - MLP and VAR
+```{r, echo=FALSE, results='hide'}
+
+  # Calculate the ensemble predictions
+  ensemble = (mlp52_for$mean + weekly)/2  #MLP and VAR
 
 
-# Model Decission
-- Need to update this code for all ASE and then do again for all WMAE
+# Print the ensemble predictions
+print(ensemble)
+
+plot(scaled$weekly_sales, type = "l")
+lines(seq(107,114,1),ensemble,col = "green")
+title("Ensemble Forecasts")
+
+```
+
+## ASE Ensemble
+```{r, echo=FALSE}
+ensemble_ASE = mean((scaled$weekly_sales[107:114] - ensemble)^2) 
+
+
+ensemble_ASE
+```
+
+
+# Model Decision - ASE
 ```{r, echo=FALSE, results='hide'}
 # Creating a data frame to hold the model results
-model_results <- data.frame(
-  Model = c("ARMA", "ARIMA", "MLP"),
-  ASE = c(arma_ase, month_ase, mlp_ASE)  # Ensure these variables exist and are numeric
+# Creating a data frame to hold the model results
+model_ase_results <- data.frame(
+  Model = c("ARMA(5,3)", "ARIMA(5,1,3)", "ARUMA(3,1,0) s=52", "Signal+Noise", "Multivariate(1,0,0) s=52", "VAR(5)", "MLP", "Ensemble"), 
+  ASE = c(arma_ase, diff_ase, season_ase, spn_ase, aruma_ASE, var_ASE, mlp52_ase, ensemble_ASE)
 )
 
 # Sort the data frame by ASE from smallest to largest
-model_results <- model_results[order(model_results$ASE), ]
+model_ase_results <- model_ase_results[order(model_ase_results$ASE), ]
 
 # Display the sorted data frame
-#print(model_results)
+print(model_ase_results)
 ```
 
-- This will give a nice little bar chart of metric scores for us to talk to
+
+
+# Model Decision - WMAE
 ```{r, echo=FALSE, results='hide'}
-# Creating a bar chart to compare ASE scores for the models
-ggplot(model_results, aes(x = Model, y = ASE, fill = Model)) +
+# Creating a data frame to hold the model results
+model_wmae_results <- data.frame(
+  Model = c("ARMA(5,3)", "VAR(5)", "MLP", "Multivariate(1,0,0) s=52"), 
+  WMAE = c(arma_wmae, var_wmae, mlp52_wmae, ARUMA_wmae)
+)
+
+# Sort the data frame by WMAE from smallest to largest
+model_wmae_results <- model_wmae_results[order(model_wmae_results$WMAE), ]
+
+# Display the sorted data frame
+print(model_wmae_results)
+```
+
+
+# Model Comparison Barchart
+```{r, echo=FALSE, results='hide'}
+# Reorder Model levels based on ASE values (smallest to largest)
+model_ase_results$Model <- factor(model_ase_results$Model, levels = model_ase_results$Model[order(model_ase_results$ASE)])
+
+# Plotting the reordered ASE bar chart
+ggplot(model_ase_results, aes(x = Model, y = ASE, fill = Model)) +
   geom_bar(stat = "identity", width = 0.5) +
   labs(title = "Model ASE Comparison", x = "Model", y = "Lower (ASE) is Better") +
-  theme_minimal()
+  theme_minimal() +
+  ylim(0, 1.3)
+
+# Reorder Model levels based on WMAE values (smallest to largest)
+model_wmae_results$Model <- factor(model_wmae_results$Model, levels = model_wmae_results$Model[order(model_wmae_results$WMAE)])
+
+# Plotting the reordered WMAE bar chart
+ggplot(model_wmae_results, aes(x = Model, y = WMAE, fill = Model)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  labs(title = "Model WMAE Comparison", x = "Model", y = "Lower (WMAE) is Better") +
+  theme_minimal() +
+  ylim(0, 1.3)
 ```
