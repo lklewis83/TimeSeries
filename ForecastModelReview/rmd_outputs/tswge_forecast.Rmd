@@ -1,1 +1,306 @@
+---
+title: "TSWGE Forecast"
+params:
+  start_date: "2012-01-01"
+  end_date: "2013-01-01"
+output: html_fragment
+---
 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+knitr::opts_chunk$set(warning = FALSE)
+
+#install.packages("ggplot2")
+library(ggplot2)
+
+library(tswge)
+
+library(dplyr)
+library(corrplot)
+
+library(knitr)
+
+
+# MLP
+#install.packages("nnfor")
+library(nnfor)
+
+# Load Files
+library(tcltk)
+
+#install.packages("jsonlite")
+library(jsonlite)
+
+# Function to show a popup and allow the user to choose a file
+choose_file_with_message <- function(message) {
+  tkmessageBox(message = message, icon = "info", type = "ok") # Display the message
+  chosen_file <- tk_choose.files() # Open the file dialog
+  return(chosen_file) # Return the chosen file path
+}
+
+
+# Use the function to choose files with descriptive messages
+trained_filtered <- read.csv(choose_file_with_message("Please select the 'walmart_train' file"))
+validation_filtered <- read.csv(choose_file_with_message("Please select the 'walmart_test' file"))
+```
+
+
+```{r, echo=FALSE, results='hide'}
+# Aggregate Weekly_Sales and retain other columns
+aggregated_data <- trained_filtered %>%
+  group_by(Date) %>%
+  summarize(
+    weekly_sales = sum(Weekly_Sales, na.rm = TRUE),  # Sum Weekly_Sales
+    IsHoliday = first(IsHoliday),  # Retain the first IsHoliday value for each date
+    Temperature = mean(Temperature, na.rm = TRUE),  # Average temperature for the date
+    Fuel_Price = mean(Fuel_Price, na.rm = TRUE),    # Average fuel price
+    CPI = mean(CPI, na.rm = TRUE),                  # Average CPI
+    Unemployment = mean(Unemployment, na.rm = TRUE),# Average unemployment
+    Store = n_distinct(Store),                      # Number of distinct stores (if applicable)
+    .groups = "drop"                                # Ungroup after summarization
+  )
+
+# Sort data by Date
+aggregated_data <- aggregated_data %>% arrange(Date)
+
+# Check aggregated data
+aggregated_data
+```
+
+
+```{r, echo=FALSE, results='hide'}
+# Create a copy of your dataset to keep the original intact
+scaled_a <- aggregated_data
+
+# List of columns to scale
+columns_to_scale <- c("Temperature", "Fuel_Price", "CPI", "Unemployment", "weekly_sales")
+
+# Scale the columns and replace them in the dataset
+scaled_a[columns_to_scale] <- scale(scaled_a[columns_to_scale])
+
+# Check the scaled dataset
+head(scaled_a)
+```
+
+
+
+```{r, echo=FALSE, results='hide'}
+start_date <- as.Date(params$start_date)
+end_date <- as.Date(params$end_date)
+
+df_filtered <- subset(scaled_a, Date >= start_date & Date <= end_date)
+
+df_filtered
+```
+
+
+```{r, echo=FALSE, results='hide'}
+# Define training and testing datasets for weekly frequency
+d52_train <- ts(scaled_a$weekly_sales[1:134], frequency = 52)  
+d52_test <- ts(scaled_a$weekly_sales[135:143], frequency = 52)
+```
+
+```{r, echo=FALSE}
+#### TEST SPLIT OF DATA
+scaled_a$Date <- as.Date(scaled_a$Date, format = "%Y-%m-%d")
+table(format(scaled_a$Date, "%Y"))
+```
+
+
+```{r, echo=FALSE}
+# For weekly frequency (52)
+exog_52 <- data.frame(  
+  cpi = as.numeric(scaled_a$CPI),
+  holiday = as.numeric(scaled_a$IsHoliday),  
+  temperature = as.numeric(scaled_a$Temperature),  
+  fuel = as.numeric(scaled_a$Fuel_Price)  
+)
+```
+
+
+```{r, echo=FALSE}
+# MLP Model
+set.seed(123)
+
+mlp52 = mlp(d52_train,reps = 10, comb = "median", difforder = c(1,12), allow.det.season = T, hd.auto.type = "cv", sel.lag = T, xreg = exog_52) 
+
+mlp52
+```
+```{r, echo=FALSE, results='hide'}
+## PLOT MLP Model
+plot(mlp52)
+```
+
+
+```{r, echo=FALSE}
+## MLP Forecast
+mlp52_for = forecast(mlp52, h=8, xreg = exog_52) # horizon was originally at 8 for 8weeks
+
+mlp52_for
+
+plot(mlp52_for)
+```
+
+```{r}
+# This means your TSWGE model automatically extended the forecast horizon due to exogenous variables or autoregressive lag structure, despite you specifying h = 8. That’s why your synthetic tswge_dates range all the way to February 2014, which is beyond your Prophet range (2012-10-26 to 2014-02-28).
+```
+
+
+```{r, echo=FALSE}
+# First, make sure scaled_a$Date is a Date object
+scaled_a$Date <- as.Date(scaled_a$Date)
+
+# Now let's verify the class
+print(class(scaled_a$Date))
+
+# Calculate the start date for forecasts properly
+forecast_start_date <- max(scaled_a$Date[1:134]) + 7  # 7 days after the last training point
+
+# Create dates for forecasts
+forecast_dates <- seq(from = forecast_start_date, 
+                     by = "week", 
+                     length.out = length(mlp52_for$mean))
+
+# Combine original data and forecasts
+all_dates <- c(scaled_a$Date[1:134], forecast_dates)
+
+# Create the combined time series
+combined_series <- ts.union(
+  Original = ts(c(scaled_a$weekly_sales[1:134], rep(NA, length(mlp52_for$mean)))),
+  Forecast = ts(c(rep(NA, 134), mlp52_for$mean))
+)
+
+# Create the data frame for plotting
+plot_df <- data.frame(
+  Date = all_dates,
+  Original = as.numeric(combined_series[, "Original"]),
+  Forecast = as.numeric(combined_series[, "Forecast"])
+)
+
+p <- ggplot(plot_df, aes(x = Date)) +
+  geom_line(aes(y = Original), color = "black", na.rm = TRUE) +
+  geom_line(aes(y = Forecast), color = "blue", size = 1, na.rm = TRUE) +
+  labs(title = "Forecasts from MLP with Dates",
+       x = "Date",
+       y = "Weekly Sales (Scaled)") +
+  theme_minimal() 
+
+# Add confidence interval ribbon if residuals are available
+if(sum(!is.na(mlp52_for$residuals)) > 0) {
+  sd_val <- sd(mlp52_for$residuals, na.rm = TRUE)
+  p <- p + geom_ribbon(aes(ymin = Forecast - sd_val*1.96,
+                          ymax = Forecast + sd_val*1.96),
+                      fill = "blue", alpha = 0.2, na.rm = TRUE)
+}
+
+# Add date formatting
+p <- p + scale_x_date(date_breaks = "3 months", date_labels = "%b %Y")
+
+# Print the plot
+print(p)
+```  
+
+```{r, echo=FALSE}
+# NEED TO RUN BY BIVIN
+
+# Step 1: Set the last known date from your training data
+#last_date <- as.Date("2012-10-26")  # update if needed from scaled_a$Date[143]
+
+# Step 2: Create 8 future weekly dates
+#tswge_dates <- seq(from = last_date + 7, by = "week", length.out = length(mlp52_for$residuals)) # Forecasted out 69 due to exogen variables
+
+#tswge_dates
+
+# First, check the actual length of the forecast output
+actual_forecast_length <- length(mlp52_for$residuals)  # 69 as per your error
+
+# Create the correct number of dates to match
+last_train_date <- as.Date(max(scaled_a$Date[1:134]))
+forecast_dates <- seq(from = last_train_date + 7, by = "week", length.out = actual_forecast_length)
+```
+
+
+
+```{r, echo=FALSE}
+# Step 3: Combine with residuals
+tswge_residuals_df <- data.frame(
+  date = forecast_dates,
+  residual = as.numeric(mlp52_for$residuals)
+)
+
+tswge_residuals_df <- tswge_residuals_df[!is.na(tswge_residuals_df$residual) & 
+                                         !is.infinite(tswge_residuals_df$residual), ]
+
+
+# head(tswge_residuals_df)
+# For the residuals (69 periods)
+residuals_with_dates <- data.frame(
+  Date = forecast_dates,
+  Residual = as.numeric(mlp52_for$residuals)
+)
+```
+
+
+```{r, echo=FALSE}
+length(forecast_dates) == length(mlp52_for$residuals)
+
+length(mlp52_for$residuals)
+length(forecast_dates)
+```
+
+
+```{r, echo=FALSE}
+# Save as CSV
+
+## FORECAST
+
+# For the mean forecasts (8 periods)
+forecast_with_dates <- data.frame(
+  Date = forecast_dates[1:length(mlp52_for$mean)],
+  Forecast = as.numeric(mlp52_for$mean)
+)
+
+write.csv(forecast_with_dates, "tswge_forecast_with_dates.csv", row.names = FALSE)
+
+write.csv(mlp52_for, "tswge_forecast_df.csv", row.names = TRUE)
+
+saveRDS(mlp52_for, "mlp52_for.rds")
+
+## RESIDUALS
+write.csv(tswge_residuals_df, "residuals_tswge.csv", row.names = TRUE)
+
+write.csv(residuals_with_dates, "tswge_residuals_with_dates.csv", row.names = FALSE)
+
+kable(tswge_residuals_df[, c("date", "residual")], format = "html")
+```
+
+```{r, echo=FALSE}
+#### ASE
+
+aligned_fitted <- mlp52_for$fitted[1:9]
+
+# Recalculate ASE
+mlp52_ase <- mean((d52_test - aligned_fitted)^2, na.rm = TRUE)
+
+saveRDS(mlp52_ase, "tswge_ase.rds")
+
+mlp52_ase 
+```
+
+
+```{r, echo=FALSE}
+#### WMAE | Kaggle
+# Weight vector
+weights <- rep(1, length(d52_test)) 
+
+# Calculate WMAE
+mlp52_wmae <- sum(weights * abs(d52_test - aligned_fitted)) / sum(weights)
+
+saveRDS(mlp52_wmae, "tswge_wmae.rds")
+
+# Print the result
+mlp52_wmae 
+```
