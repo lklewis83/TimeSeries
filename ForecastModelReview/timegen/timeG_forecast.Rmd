@@ -1,0 +1,196 @@
+---
+title: "Prophet Forecasting"
+params:
+  start_date: "2012-01-01"
+  end_date: "2013-01-01"
+output: html_fragment
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+knitr::opts_chunk$set(warning = FALSE)
+
+#install.packages("ggplot2")
+library(ggplot2)
+
+library(knitr)
+
+
+#install.packages("nixtlar")
+library(nixtlar)
+nixtla_client_setup(api_key = "nixak-7ets7vrIWyzhemyV7pdjiRmseD6vKw6GRApDOSSwmE36OaPLLVskd5tBuM9t2PtOTWt4HM6b92tbCSvM")
+
+library(dplyr)
+library(corrplot)
+
+
+# Load Files
+library(tcltk)
+
+#install.packages("jsonlite")
+library(jsonlite)
+
+
+# Function to show a popup and allow the user to choose a file
+choose_file_with_message <- function(message) {
+  tkmessageBox(message = message, icon = "info", type = "ok") # Display the message
+  chosen_file <- tk_choose.files() # Open the file dialog
+  return(chosen_file) # Return the chosen file path
+}
+
+# Use the function to choose files with descriptive messages
+trained_filtered <- read.csv(choose_file_with_message("Please select the 'walmart_train' file"))
+validation_filtered <- read.csv(choose_file_with_message("Please select the 'walmart_test' file"))
+```
+
+
+```{r, echo=FALSE, results='hide'}
+# Create a copy of your dataset to keep the original intact
+scaled_a = trained_filtered
+
+# List of columns to scale
+columns_to_scale <- c("Temperature", "Fuel_Price", "CPI", "Unemployment", "Weekly_Sales")
+
+# Scale the columns and replace them in the dataset
+scaled_a[columns_to_scale] <- scale(scaled_a[columns_to_scale])
+
+# Check the scaled dataset
+#head(scaled_a)
+```
+
+
+```{r, echo=FALSE, results='hide'}
+start_date <- as.Date(params$start_date)
+end_date <- as.Date(params$end_date)
+
+df_filtered <- subset(scaled_a, Date >= start_date & Date <= end_date)
+
+df_filtered
+```
+
+```{r}
+# TimeGen Dataframe Structure
+new_df <- scaled_a[, c("Date", "Weekly_Sales")]
+
+colnames(new_df) <- c("ds", "y")
+
+new_df$unique_id = paste(scaled_a$Store,scaled_a$IsHoliday, sep = "-")
+
+
+#head(new_df)
+#max(new_df$ds)
+
+#new_df$ds <- as.Date(new_df$ds, format = "%Y-%m-%d")
+#table(format(new_df$ds, "%Y"))
+```
+
+
+```{r, echo=FALSE}
+set.seed(123)
+
+forecast_w = nixtla_client_forecast(new_df, h = 8, level = c(80,95))
+# UPDATE HORIZON FOR R-Shiny App Use | h = forecast_length
+
+#head(forecast_w)
+forecast_w
+```
+
+```{r, echo=FALSE}
+c_forecast <- nixtla_client_cross_validation(new_df, h = 8)
+
+saveRDS(c_forecast, "timeG_C_for.rds")
+write.csv(c_forecast, "timeG_C_forecast_df.csv", row.names = TRUE)
+
+#head(c_forecast)
+c_forecast
+```
+
+```{r, echo=FALSE}
+# Convert ds column to POSIXct format
+new_df$ds <- as.POSIXct(new_df$ds)
+saveRDS(new_df, "nixtla_new_df.rds")
+
+
+forecast_w$ds <- as.POSIXct(forecast_w$ds)
+saveRDS(forecast_w, "nixtla_forecast_w.rds")
+write.csv(forecast_w, "timeG_forecast_df.csv", row.names = TRUE)
+```
+
+```{r, echo=FALSE}
+nixtla_client_plot(new_df, forecast_w)
+```
+
+```{r, echo=FALSE}
+nixtla_client_plot(new_df, forecast_w, max_insample_length = 200)
+```
+
+```{r, echo=FALSE}
+#Cross Validation
+nixtla_client_plot(new_df, c_forecast)
+```
+
+
+
+```{r, echo=FALSE}
+# Create the residuals and time dataframe
+
+# How many forecast rows?
+n_forecast <- nrow(forecast_w)
+
+# Slice the last n_forecast rows from new_df
+actuals_matched <- new_df[(nrow(new_df) - n_forecast + 1):nrow(new_df), ]
+
+# Now build residuals dataframe
+timeG_residuals_df <- data.frame(
+  date = forecast_w$ds,
+  residual = actuals_matched$y - forecast_w$TimeGPT
+)
+
+# Check it
+#head(residuals_df)
+```
+
+
+```{r, echo=FALSE}
+# Save Residuals
+write.csv(timeG_residuals_df, "residuals_timeG.csv", row.names = TRUE)
+saveRDS(timeG_residuals_df, "residuals_timeG.rds")
+kable(timeG_residuals_df[, c("date", "residual")], format = "html")
+```
+
+
+```{r, echo=FALSE}
+#### ASE
+# Now compute ASE (Average Squared Error)
+timeG_ase <- mean((timeG_residuals_df$residual)^2, na.rm = TRUE)
+
+saveRDS(timeG_ase, "timeG_ase.rds")
+
+timeG_ase
+```
+
+
+```{r, echo=FALSE}
+#### WMAE | Kaggle
+# Extract the predicted values
+#predicted <- forecast$yhat
+
+# Make sure your actuals match the forecast horizon
+#actuals <- tail(new_df$y, length(predicted))
+
+# Ensure both are numeric
+actuals <- as.numeric(actuals_matched$y)
+predicted <- as.numeric(forecast_w$TimeGPT)
+
+# Weight vector (uniform)
+weights <- rep(1, length(predicted))
+
+# Calculate WMAE
+timeG_wmae <- sum(weights * abs(actuals - predicted)) / sum(weights)
+
+saveRDS(timeG_wmae, "timeG_wmae.rds")
+
+# Print result
+timeG_wmae
+```

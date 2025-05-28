@@ -1,0 +1,288 @@
+---
+title: "Prophet Forecasting"
+params:
+  start_date: "2012-01-01"
+  end_date: "2013-01-01"
+output: html_fragment
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+knitr::opts_chunk$set(warning = FALSE)
+
+#install.packages("ggplot2")
+library(ggplot2)
+
+library(knitr)
+
+
+#install.packages("nixtlar")
+library(nixtlar)
+nixtla_client_setup(api_key = "nixak-7ets7vrIWyzhemyV7pdjiRmseD6vKw6GRApDOSSwmE36OaPLLVskd5tBuM9t2PtOTWt4HM6b92tbCSvM")
+
+library(dplyr)
+library(corrplot)
+
+
+# Load Files
+library(tcltk)
+
+#install.packages("jsonlite")
+library(jsonlite)
+
+
+# Function to show a popup and allow the user to choose a file
+choose_file_with_message <- function(message) {
+  tkmessageBox(message = message, icon = "info", type = "ok") # Display the message
+  chosen_file <- tk_choose.files() # Open the file dialog
+  return(chosen_file) # Return the chosen file path
+}
+
+# Use the function to choose files with descriptive messages
+train <- read.csv(choose_file_with_message("Please select the 'train' file"))
+feature <- read.csv(choose_file_with_message("Please select the 'feature' file"))
+store <- read.csv(choose_file_with_message("Please select the 'store' file"))
+valid <- read.csv(choose_file_with_message("Please select the 'test' file"))
+```
+
+
+```{r, echo=FALSE, results='hide'}
+# EDA & CLEAN DATA
+## Merge Data
+new_trained = merge(train, feature, by = c("Store", "Date"), all.x = T) # Left Join tested and no Unmatched fields...
+
+trained = merge(new_trained, store, by = c("Store"), all.x = T) 
+
+#head(trained)
+```
+
+```{r, echo=FALSE, results='hide'}
+### Validation Dataset
+new_validation = merge(valid, feature, by = c("Store", "Date"), all.x = T)
+
+validation = merge(new_validation, store, by = c("Store"), all.x = T) 
+
+#head(validation)
+```
+
+```{r, echo=FALSE, results='hide'}
+### Clean up merge duplicate columns
+# Automatically drop duplicate columns with ".y" suffix
+trained <- trained[, !grepl("\\.y$", names(trained))]
+validation <- validation[, !grepl("\\.y$", names(validation))]
+
+# Rename columns ending with ".x" by removing the ".x" suffix
+names(trained) <- gsub("\\.x$", "", names(trained))
+names(validation) <- gsub("\\.x$", "", names(validation))
+
+
+# Confirm the dimensions of each dataset
+#cat("Training set dimensions:", dim(trained), "\n")
+#cat("Validation set dimensions:", dim(validation), "\n")
+```
+
+```{r, echo=FALSE, results='hide'}
+### Clean up date types
+
+# Function to process a dataset (convert data types)
+process_dataset <- function(data) {
+  # Convert "Date" column to Date format
+  data$Date <- as.Date(data$Date, format = "%Y-%m-%d")
+  
+  # Ensure IsHoliday remains as integers (0/1)
+  data$IsHoliday <- as.integer(data$IsHoliday)
+  
+  # Convert numeric columns to integers where appropriate, excluding Weekly_Sales and IsHoliday
+  numeric_columns <- setdiff(names(data)[sapply(data, is.numeric)], c("Weekly_Sales", "IsHoliday"))
+  data[numeric_columns] <- lapply(data[numeric_columns], as.integer)
+  
+  # Keep "Weekly_Sales" and other continuous variables as numeric
+  if ("Weekly_Sales" %in% names(data)) {
+    data$Weekly_Sales <- as.numeric(data$Weekly_Sales)
+  }
+  
+  # Return the processed dataset
+  return(data)
+}
+```
+
+
+```{r, echo=FALSE, results='hide'}
+# Apply the function to train_set and test_set
+trained <- process_dataset(trained)
+
+
+# Verify the updated data types
+#cat("Original Trained structure:\n")
+#str(trained)
+
+### Validation Dataset
+validation <- process_dataset(validation)
+
+# Verify the updated data types
+#cat("Original Test structure:\n")
+#str(validation)
+```
+
+
+```{r, echo=FALSE}
+## NA Values
+# calculate the percentage of missing values for each column
+missing_percentage <- sapply(trained, function(col) {
+  sum(is.na(col)) / length(col) * 100
+})
+
+# Calculate the percentage of missing values for each column
+missing_percentage <- sapply(trained, function(col) {
+  sum(is.na(col)) / length(col) * 100
+})
+
+missing_percentage
+```
+
+
+```{r, echo=FALSE, results='hide'}
+### Remove NA >50%
+
+# Drop all columns with names starting with 'MarkDown'
+trained <- trained[, !grepl("^MarkDown", names(trained))]
+
+#trained
+
+validation <- validation[, !grepl("^MarkDown", names(validation))]
+```
+
+
+```{r, echo=FALSE, results='hide'}
+# Create a copy of your dataset to keep the original intact
+scaled_a = trained
+
+# List of columns to scale
+columns_to_scale <- c("Temperature", "Fuel_Price", "CPI", "Unemployment", "Weekly_Sales")
+
+# Scale the columns and replace them in the dataset
+scaled_a[columns_to_scale] <- scale(scaled_a[columns_to_scale])
+
+# Check the scaled dataset
+#head(scaled_a)
+```
+
+
+```{r, echo=FALSE, results='hide'}
+start_date <- as.Date(params$start_date)
+end_date <- as.Date(params$end_date)
+
+df_filtered <- subset(scaled_a, Date >= start_date & Date <= end_date)
+
+df_filtered
+```
+
+```{r}
+# TimeGen Dataframe Structure
+# new_df <- scaled_a[, c("Date", "Weekly_Sales", "Type")]
+new_df <- scaled_a[, c("Date", "Weekly_Sales", "Dept")]
+
+colnames(new_df) <- c("ds", "y", "unique_id")
+
+
+#head(new_df)
+#max(new_df$ds)
+
+#new_df$ds <- as.Date(new_df$ds, format = "%Y-%m-%d")
+#table(format(new_df$ds, "%Y"))
+```
+
+
+```{r, echo=FALSE}
+set.seed(123)
+
+forecast_w = nixtla_client_forecast(new_df, h = 8, level = c(80,95))
+# UPDATE HORIZON FOR R-Shiny App Use | h = forecast_length
+
+#head(forecast_w)
+forecast_w
+```
+
+```{r, echo=FALSE}
+c_forecast <- nixtla_client_cross_validation(new_df, h = 8)
+
+#head(c_forecast)
+c_forecast
+```
+
+```{r, echo=FALSE}
+# Convert ds column to POSIXct format
+new_df$ds <- as.POSIXct(new_df$ds)
+forecast_w$ds <- as.POSIXct(forecast_w$ds)
+```
+
+```{r, echo=FALSE}
+nixtla_client_plot(new_df, forecast_w)
+```
+
+```{r, echo=FALSE}
+nixtla_client_plot(new_df, forecast_w, max_insample_length = 200)
+```
+
+```{r, echo=FALSE}
+#Cross Validation
+nixtla_client_plot(new_df, c_forecast)
+```
+
+
+
+```{r, echo=FALSE}
+# Create the residuals and time dataframe
+
+# How many forecast rows?
+n_forecast <- nrow(forecast_w)
+
+# Slice the last n_forecast rows from new_df
+actuals_matched <- new_df[(nrow(new_df) - n_forecast + 1):nrow(new_df), ]
+
+# Now build residuals dataframe
+timeG_residuals_df <- data.frame(
+  date = forecast_w$ds,
+  residual = actuals_matched$y - forecast_w$TimeGPT
+)
+
+# Check it
+#head(residuals_df)
+```
+
+
+
+
+
+```{r, echo=FALSE}
+#### ASE
+# Now compute ASE (Average Squared Error)
+timeG_ase <- mean((timeG_residuals_df$residual)^2, na.rm = TRUE)
+
+timeG_ase
+```
+
+
+```{r, echo=FALSE}
+#### WMAE | Kaggle
+# Extract the predicted values
+#predicted <- forecast$yhat
+
+# Make sure your actuals match the forecast horizon
+#actuals <- tail(new_df$y, length(predicted))
+
+# Ensure both are numeric
+actuals <- as.numeric(actuals_matched$y)
+predicted <- as.numeric(forecast_w$TimeGPT)
+
+# Weight vector (uniform)
+weights <- rep(1, length(predicted))
+
+# Calculate WMAE
+timeG_wmae <- sum(weights * abs(actuals - predicted)) / sum(weights)
+
+
+# Print result
+timeG_wmae
+```
