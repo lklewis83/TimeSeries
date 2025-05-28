@@ -1,0 +1,259 @@
+---
+title: "Prophet Forecasting"
+params:
+  start_date: "2012-01-01"
+  end_date: "2013-01-01"
+output: html_fragment
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+knitr::opts_chunk$set(warning = FALSE)
+
+#install.packages("ggplot2")
+library(ggplot2)
+
+library(knitr)
+
+#install.packages("prophet")
+library(prophet)
+#library(forecast)
+
+library(dplyr)
+library(corrplot)
+
+
+# Load Files
+library(tcltk)
+
+#install.packages("jsonlite")
+library(jsonlite)
+
+# Function to show a popup and allow the user to choose a file
+choose_file_with_message <- function(message) {
+  tkmessageBox(message = message, icon = "info", type = "ok") # Display the message
+  chosen_file <- tk_choose.files() # Open the file dialog
+  return(chosen_file) # Return the chosen file path
+}
+
+# Use the function to choose files with descriptive messages
+trained_filtered <- read.csv(choose_file_with_message("Please select the 'walmart_train' file"))
+validation_filtered <- read.csv(choose_file_with_message("Please select the 'walmart_test' file"))
+```
+
+
+
+```{r, echo=FALSE, results='hide'}
+# Aggregate Weekly_Sales and retain other columns
+aggregated_data <- trained_filtered %>%
+  group_by(Date) %>%
+  summarize(
+    weekly_sales = sum(Weekly_Sales, na.rm = TRUE),  # Sum Weekly_Sales
+    IsHoliday = first(IsHoliday),  # Retain the first IsHoliday value for each date
+    Temperature = mean(Temperature, na.rm = TRUE),  # Average temperature for the date
+    Fuel_Price = mean(Fuel_Price, na.rm = TRUE),    # Average fuel price
+    CPI = mean(CPI, na.rm = TRUE),                  # Average CPI
+    Unemployment = mean(Unemployment, na.rm = TRUE),# Average unemployment
+    Store = n_distinct(Store),                      # Number of distinct stores (if applicable)
+    .groups = "drop"                                # Ungroup after summarization
+  )
+
+# Sort data by Date
+aggregated_data <- aggregated_data %>% arrange(Date)
+
+# Check aggregated data
+#aggregated_data
+```
+
+
+```{r, echo=FALSE, results='hide'}
+# Create a copy of your dataset to keep the original intact
+scaled_a <- aggregated_data
+
+# List of columns to scale
+columns_to_scale <- c("Temperature", "Fuel_Price", "CPI", "Unemployment", "weekly_sales")
+
+# Scale the columns and replace them in the dataset
+scaled_a[columns_to_scale] <- scale(scaled_a[columns_to_scale])
+
+# Check the scaled dataset
+#head(scaled_a)
+```
+
+
+```{r, echo=FALSE, results='hide'}
+start_date <- as.Date(params$start_date)
+end_date <- as.Date(params$end_date)
+
+df_filtered <- subset(scaled_a, Date >= start_date & Date <= end_date)
+
+df_filtered
+```
+
+```{r}
+# Prophet Dataframe Structure
+new_df <- scaled_a[, c("Date", "weekly_sales")]
+
+colnames(new_df) <- c("ds", "y")
+
+write.csv(scaled_a, "scaled.csv", row.names = TRUE)
+
+#head(new_df)
+#max(new_df$ds)
+```
+
+```{r, echo=FALSE}
+#### TEST SPLIT OF DATA
+
+new_df$ds <- as.Date(new_df$ds, format = "%Y-%m-%d")
+table(format(new_df$ds, "%Y"))
+```
+
+```{r, echo=FALSE}
+# Define holiday dates
+holidays <- data.frame(
+  holiday = rep(c("thanksgiving", "black_friday", "cyber_monday", "christmas"), each = 3),
+  ds = as.Date(c("2010-11-25", "2011-11-24", "2012-11-22",    # Thanksgiving
+                 "2010-11-26", "2011-11-25", "2012-11-23",    # Black Friday
+                 "2010-11-29", "2011-11-28", "2012-11-26",    # Cyber Monday
+                 "2010-12-25", "2011-12-25", "2012-12-25")),  # Christmas
+  lower_window = -2,   # Cover 3 days before
+  upper_window = 2     # Cover 2 days after
+)
+
+#holidays
+```
+
+```{r, echo=FALSE}
+# prophet fit the model
+set.seed(123)
+
+#m <- prophet(train_set) # Part of the data
+
+m <- prophet(new_df,
+             yearly.seasonality = "auto",
+             weekly.seasonality = "auto",
+             daily.seasonality = "auto",
+             holidays = holidays,
+             interval.width = 0.95)
+
+
+#m
+saveRDS(m, "prophet_model.rds")
+```
+
+
+```{r, echo=FALSE}
+# Manually Create future data
+## Includes all historical dates plus the 70-week future horizon.
+future <- make_future_dataframe(m, periods = 8, freq = "week") 
+# periods should be replaced with 'forecast_length' when used in the R app so that the user can define the weekly period. This will allow user to choose up to 143 weeks?
+```
+
+```{r, echo=FALSE}
+forecast <- predict(m, future)
+```
+
+
+```{r, echo=FALSE}
+plot(m, forecast)
+```
+
+```{r, echo=FALSE}
+dyplot.prophet(m, forecast)
+```
+
+
+```{r, echo=FALSE}
+prophet_plot_components(m, forecast)
+```
+
+
+
+```{r}
+residuals_df <- forecast %>%
+  dplyr::select(ds, yhat) %>%
+  left_join(new_df, by = "ds") %>%
+  mutate(residual = y - yhat)
+
+
+head(residuals_df)
+#max(residuals_df$ds)
+```
+
+
+
+```{r, echo=FALSE}
+# Keep only what's needed for context building
+residuals <- residuals_df[, c("ds", "residual")]
+
+# change Column Names
+residuals <- residuals %>%
+  dplyr::rename(
+    date = ds
+  )
+
+prophet_residuals_df <- residuals %>%
+  dplyr::filter(!is.na(residual) & date <= as.Date("2012-10-26"))
+
+#head(prophet_residuals_df)
+```
+
+```{r, echo=FALSE}
+# SAVE FORECAST
+write.csv(forecast, "prophet_forecast_df.csv", row.names = TRUE)
+
+saveRDS(forecast, "prophet_for.rds")
+
+# SAVE RESIDUALS
+write.csv(prophet_residuals_df, "residuals_prophet.csv", row.names = TRUE)
+
+saveRDS(prophet_residuals_df, "residuals_prophet.rds")
+
+kable(prophet_residuals_df[, c("date", "residual")], format = "html")
+```
+
+```{r, echo=FALSE}
+#### ASE
+# Extract actuals (for the matching period)
+actuals <- tail(new_df$y, nrow(forecast))
+# I will need to replace 'forecast' with 'forecast_length' when used in the R app so that the user can define
+
+# Extract predicted values
+predicted <- forecast$yhat
+
+# Now compute ASE (Average Squared Error)
+prophet_ase <- mean((actuals - predicted)^2, na.rm = TRUE)
+
+saveRDS(prophet_ase, "prophet_ase.rds")
+
+prophet_ase
+```
+```{r, echo=FALSE}
+stopifnot(length(actuals) == nrow(predicted))
+```
+
+```{r, echo=FALSE}
+#### WMAE | Kaggle
+# Extract the predicted values
+#predicted <- forecast$yhat
+
+# Make sure your actuals match the forecast horizon
+#actuals <- tail(new_df$y, length(predicted))
+
+# Ensure both are numeric
+actuals <- as.numeric(actuals)
+predicted <- as.numeric(predicted)
+
+# Weight vector (uniform)
+weights <- rep(1, length(predicted))
+
+# Calculate WMAE
+prophet_wmae <- sum(weights * abs(actuals - predicted)) / sum(weights)
+
+saveRDS(prophet_wmae, "prophet_wmae.rds")
+
+# Print result
+prophet_wmae
+```
