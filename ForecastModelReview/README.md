@@ -1,6 +1,8 @@
 # 📊 Walmart Forecast Model Review | R-Shiny Dashboard
 
 A comparative time series forecasting dashboard built in **R-Shiny**, using three distinct modeling approaches: **TSWGE**, **Prophet**, and **TimeGen**.
+[R-Shiny Forecast Review Dashboard](https://blackjuliet.shinyapps.io/Forecast_Model_Review/).
+
 
 ---
 
@@ -44,35 +46,39 @@ A comparative time series forecasting dashboard built in **R-Shiny**, using thre
 
 ---
 
-**FOLDER STRUCTURE**
-│
-├── README.md
-├── app.R
-├── www/                  # Static assets like logos/images
-│   └── walmart_logo.png
-├── tswge/                # TSWGE-specific outputs
-│   ├── tswge_ase.rds
-│   ├── tswge_wmae.rds
-│   ├── tswge_forecast_with_dates.csv
-│   └── tswge_residuals_with_dates.csv
-├── prophet/              # Prophet-specific outputs
-│   ├── prophet_for.rds
-│   ├── prophet_model.rds
-│   ├── prophet_ase.rds
-│   ├── prophet_wmae.rds
-│   └── residuals_prophet.rds
-├── timegen/              # TimeGen (Nixtla) outputs
-│   ├── timeG_for.rds
-│   ├── timeG_ase.rds
-│   ├── timeG_wmae.rds
-│   ├── residuals_timeG.rds
-│   └── nixtla_forecast_w.rds
-├── data/                 # Input and reference datasets
-│   ├── walmart_train.csv
-│   ├── walmart_test.csv
-│   └── scaled_datasets.csv
-└── rmd_outputs/          # R Markdown rendered HTML outputs
-    ├── tswge_forecast.Rmd
-    ├── prophet_forecast.Rmd
-    └── timeG_forecast.Rmd
+## 📁 Folder Structure
+##### README.md — Project overview and instructions
+##### app.R — Main Shiny dashboard script
+##### www/ — Static assets
+- walmart_logo.png
+
+##### tswge/ — TSWGE-specific outputs
+- tswge_ase.rds
+- tswge_wmae.rds
+- tswge_forecast_with_dates.csv
+- tswge_residuals_with_dates.csv
+
+##### prophet/ — Prophet model outputs
+- prophet_for.rds
+- prophet_model.rds
+- prophet_ase.rds
+- prophet_wmae.rds
+- residuals_prophet.rds
+
+##### timegen/ — TimeGen (Nixtla) model outputs
+- timeG_for.rds
+- timeG_ase.rds
+- timeG_wmae.rds
+- residuals_timeG.rds
+- nixtla_forecast_w.rds
+
+##### data/ — Input and reference datasets
+- walmart_train.csv
+- walmart_test.csv
+- scaled_datasets.csv
+
+##### rmd_outputs/ — R Markdown report outputs
+- tswge_forecast.Rmd
+- prophet_forecast.Rmd
+- timeG_forecast.Rmd
 
